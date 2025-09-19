@@ -51,10 +51,11 @@ impl Error for ErrorC {
 
 #[tokio::main]
 async fn main() {
+    // TODO chaneg this too when testing
     let api_key = std::env::var("HONEYCOMB_API_KEY")
         .expect("HONEYCOMB_API_KEY environment variable to be valid");
     let (layer, task, controller) = tracing_honeycombio::builder(&api_key)
-        .build(tracing_honeycombio::HONEYCOMB_SERVER_US, "test")
+        .build(tracing_honeycombio::AXIOM_SERVER_US, "test")
         .unwrap();
     let handle = tokio::spawn(task);
     let subscriber = tracing_subscriber::registry()

@@ -1,5 +1,5 @@
 [package]
-name = "tracing-honeycombio"
+name = "tracing-axiomco" 
 version = "0.1.0"
 edition = "2024"
 
@@ -24,14 +24,17 @@ tracing-mock = { version = "0.1.0-beta.1", features = ["tracing-subscriber"] }
 [[bench]]
 name = "simple_bench"
 harness = false
+required_features = ["benchmarks"]
 
 [[bench]]
 name = "span_micro"
 harness = false
+required_features = ["benchmarks"]
 
 [[bench]]
 name = "event_micro"
 harness = false
+required_features = ["benchmarks"]
 
 [features]
 default = ["rustls-tls-webpki-roots"]
@@ -43,3 +46,4 @@ rustls-tls-manual-roots = ["reqwest/rustls-tls-manual-roots"]
 rustls-tls-webpki-roots = ["reqwest/rustls-tls-webpki-roots"]
 rustls-tls-native-roots = ["reqwest/rustls-tls-native-roots"]
 system-proxy = ["reqwest/system-proxy"]
+benchmarks = []

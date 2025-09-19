@@ -5,9 +5,9 @@ use tokio::sync::mpsc;
 use tracing::{Level, Subscriber, span};
 use tracing_subscriber::registry::LookupSpan;
 
-use crate::{Fields, HoneycombEvent, SpanId, TraceId};
+use crate::{AxiomEvent, Fields, SpanId, TraceId};
 
-fn level_as_honeycomb_str(level: &Level) -> &'static str {
+fn level_as_axiom_str(level: &Level) -> &'static str {
     match *level {
         Level::TRACE => "trace",
         Level::DEBUG => "debug",
@@ -43,13 +43,13 @@ impl Timings {
 
 pub struct Layer {
     service_name: Option<Cow<'static, str>>,
-    sender: mpsc::Sender<Option<HoneycombEvent>>,
+    sender: mpsc::Sender<Option<AxiomEvent>>,
 }
 
 impl Layer {
     pub fn new(
         service_name: Option<Cow<'static, str>>,
-        sender: mpsc::Sender<Option<HoneycombEvent>>,
+        sender: mpsc::Sender<Option<AxiomEvent>>,
     ) -> Self {
         Self {
             service_name,
@@ -155,8 +155,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         }
         event.record(&mut fields);
         // don't care if channel closed. if capacity is reached, we have larger problems
-        let _ = self.sender.try_send(Some(HoneycombEvent {
-            time: timestamp,
+        let _ = self.sender.try_send(Some(AxiomEvent {
+            _time: timestamp,
             span_id: None,
             trace_id: span
                 .as_ref()
@@ -167,7 +167,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             duration_ms: None,
             idle_ns: None,
             busy_ns: None,
-            level: level_as_honeycomb_str(meta.level()),
+            level: level_as_axiom_str(meta.level()),
             name: Cow::Borrowed(meta.name()),
             target: Cow::Borrowed(meta.target()),
             fields,
@@ -220,8 +220,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         span.extensions_mut().remove::<Fields>();
         let trace_id = span.extensions_mut().remove::<TraceId>();
 
-        let _ = self.sender.try_send(Some(HoneycombEvent {
-            time: timestamp,
+        let _ = self.sender.try_send(Some(AxiomEvent {
+            _time: timestamp,
             span_id: span.extensions_mut().remove::<SpanId>(),
             trace_id,
             parent_span_id: span
@@ -232,7 +232,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             duration_ms,
             idle_ns,
             busy_ns,
-            level: level_as_honeycomb_str(meta.level()),
+            level: level_as_axiom_str(meta.level()),
             name: Cow::Borrowed(meta.name()),
             target: Cow::Borrowed(meta.target()),
             fields,

@@ -16,9 +16,7 @@ pub mod background;
 pub mod builder;
 pub mod layer;
 
-pub use builder::{
-    Builder, HONEYCOMB_AUTH_HEADER_NAME, HONEYCOMB_SERVER_EU, HONEYCOMB_SERVER_US, builder,
-};
+pub use builder::{AXIOM_AUTH_HEADER_NAME, AXIOM_SERVER_EU, AXIOM_SERVER_US, Builder, builder};
 pub use reqwest::Url;
 
 pub const OTEL_FIELD_SPAN_ID: &str = "trace.span_id";
@@ -313,8 +311,10 @@ impl Serialize for TraceId {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct HoneycombEvent {
-    pub time: OffsetDateTime,
+pub struct AxiomEvent {
+    // TODO look into doc more for axiom specific field requirements
+    // see https://axiom.co/docs/reference/field-restrictions for timestamp field requirements on Axiom
+    pub _time: OffsetDateTime,
     pub span_id: Option<SpanId>,
     pub trace_id: Option<TraceId>,
     pub parent_span_id: Option<SpanId>,
@@ -329,7 +329,7 @@ pub struct HoneycombEvent {
     pub fields: Fields,
 }
 
-impl HoneycombEvent {
+impl AxiomEvent {
     fn serialize_data_fields<M: SerializeMap>(
         &self,
         m: &mut M,
@@ -368,7 +368,7 @@ impl HoneycombEvent {
     }
 }
 
-impl Serialize for HoneycombEvent {
+impl Serialize for AxiomEvent {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -377,12 +377,12 @@ impl Serialize for HoneycombEvent {
         root.serialize_entry(
             "time",
             &self
-                .time
+                ._time
                 .format(&time::format_description::well_known::Rfc3339)
                 .map_err(serde::ser::Error::custom)?,
         )?;
 
-        struct InnerData<'a>(&'a HoneycombEvent);
+        struct InnerData<'a>(&'a AxiomEvent);
 
         impl<'a> Serialize for InnerData<'a> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -403,7 +403,7 @@ impl Serialize for HoneycombEvent {
 pub type ExtraFields = Vec<(Cow<'static, str>, Value)>;
 
 pub struct CreateEventsPayload<'a> {
-    events: &'a Vec<HoneycombEvent>,
+    events: &'a Vec<AxiomEvent>,
     extra_fields: &'a ExtraFields,
 }
 
@@ -424,7 +424,7 @@ impl<'a> Serialize for CreateEventsPayload<'a> {
 }
 
 struct CreateEventPayload<'a> {
-    event: &'a HoneycombEvent,
+    event: &'a AxiomEvent,
     extra_fields: &'a ExtraFields,
 }
 
@@ -438,11 +438,11 @@ impl<'a> Serialize for CreateEventPayload<'a> {
             "time",
             &self
                 .event
-                .time
+                ._time
                 .format(&time::format_description::well_known::Rfc3339)
                 .map_err(serde::ser::Error::custom)?,
         )?;
-        struct InnerData<'a>(&'a HoneycombEvent, &'a ExtraFields);
+        struct InnerData<'a>(&'a AxiomEvent, &'a ExtraFields);
 
         impl<'a> Serialize for InnerData<'a> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

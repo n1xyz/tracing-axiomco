@@ -8,7 +8,7 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::{instrument::WithSubscriber, subscriber::NoSubscriber};
 
-use crate::HoneycombEvent;
+use crate::AxiomEvent;
 
 #[derive(Debug)]
 pub struct BadRedirect {
@@ -48,15 +48,15 @@ pub trait Backend {
 }
 
 pub struct ClientBackend {
-    pub honeycomb_endpoint_url: Url,
+    pub axiom_endpoint_url: Url,
     pub compression_context: zstd::zstd_safe::CCtx<'static>,
     pub http_client: reqwest::Client,
 }
 
 impl ClientBackend {
-    pub fn new(honeycomb_endpoint_url: Url, http_headers: reqwest::header::HeaderMap) -> Self {
+    pub fn new(axiom_endpoint_url: Url, http_headers: reqwest::header::HeaderMap) -> Self {
         Self {
-            honeycomb_endpoint_url,
+            axiom_endpoint_url,
             compression_context: zstd::zstd_safe::CCtx::try_create().expect("zstd context allocation to succeed"),
             http_client: reqwest::Client::builder()
                 .user_agent(concat!(
@@ -91,7 +91,7 @@ impl Backend for ClientBackend {
                     .expect("none of the tracing field types can fail to serialize and zstd compression should succeed");
         encoder.finish().expect("zstd compression should succeed");
 
-        let request_builder = self.http_client.post(self.honeycomb_endpoint_url.clone());
+        let request_builder = self.http_client.post(self.axiom_endpoint_url.clone()); // TODO make sure callgraph inputs correctly
         Box::pin(
             async move {
                 let resp = request_builder
@@ -116,14 +116,14 @@ impl Backend for ClientBackend {
 }
 
 struct BackgroundTaskInner<B> {
-    receiver: mpsc::Receiver<Option<HoneycombEvent>>,
+    receiver: mpsc::Receiver<Option<AxiomEvent>>,
     extra_fields: ExtraFields,
     backend: B,
     backoff_count: u32,
     quitting: bool,
     // we can't recv into inflight_reqs because the buffer must hold `Option`s
-    recv_buf: Vec<Option<HoneycombEvent>>,
-    inflight_reqs: Vec<HoneycombEvent>,
+    recv_buf: Vec<Option<AxiomEvent>>,
+    inflight_reqs: Vec<AxiomEvent>,
 }
 
 struct InflightState<F> {
@@ -248,7 +248,7 @@ where
                     error_count = self.backoff_count + 1,
                     ?backoff_time,
                     error = %e,
-                    "couldn't send logs to honeycomb",
+                    "couldn't send logs to axiom",
                 );
                 default_guard = tracing::subscriber::set_default(NoSubscriber::default());
                 if drop_outstanding {
@@ -320,14 +320,14 @@ pub struct BackgroundTaskFut<B: Backend>(BackgroundTaskInner<B>, State<B::Fut>);
 
 impl BackgroundTaskFut<ClientBackend> {
     pub fn new(
-        honeycomb_endpoint_url: Url,
+        axiom_endpoint_url: Url,
         http_headers: reqwest::header::HeaderMap,
         extra_fields: ExtraFields,
-        receiver: mpsc::Receiver<Option<HoneycombEvent>>,
+        receiver: mpsc::Receiver<Option<AxiomEvent>>,
     ) -> Self {
         Self::new_with_backend(
             extra_fields,
-            ClientBackend::new(honeycomb_endpoint_url, http_headers),
+            ClientBackend::new(axiom_endpoint_url, http_headers),
             receiver,
         )
     }
@@ -337,7 +337,7 @@ impl<B: Backend> BackgroundTaskFut<B> {
     pub fn new_with_backend(
         extra_fields: ExtraFields,
         backend: B,
-        receiver: mpsc::Receiver<Option<HoneycombEvent>>,
+        receiver: mpsc::Receiver<Option<AxiomEvent>>,
     ) -> Self {
         Self(
             BackgroundTaskInner {
@@ -381,11 +381,11 @@ pub type BackgroundTask = BackgroundTaskFut<ClientBackend>;
 ///
 /// It'll still try to send all available data and then quit.
 pub struct BackgroundTaskController {
-    sender: mpsc::Sender<Option<HoneycombEvent>>,
+    sender: mpsc::Sender<Option<AxiomEvent>>,
 }
 
 impl BackgroundTaskController {
-    pub fn new(sender: mpsc::Sender<Option<HoneycombEvent>>) -> Self {
+    pub fn new(sender: mpsc::Sender<Option<AxiomEvent>>) -> Self {
         Self { sender }
     }
 
@@ -406,7 +406,7 @@ impl BackgroundTaskController {
 mod tests {
     use super::*;
     use crate::{
-        CreateEventsPayload, HONEYCOMB_AUTH_HEADER_NAME, OTEL_FIELD_LEVEL, OTEL_FIELD_PARENT_ID,
+        AXIOM_AUTH_HEADER_NAME, CreateEventsPayload, OTEL_FIELD_LEVEL, OTEL_FIELD_PARENT_ID,
         OTEL_FIELD_SPAN_ID, OTEL_FIELD_TRACE_ID, SpanId, builder::DEFAULT_CHANNEL_SIZE,
     };
     use axum::{
@@ -434,7 +434,7 @@ mod tests {
     use tracing_subscriber::{Layer, filter, layer::SubscriberExt};
 
     struct RecorderBackend {
-        events: Vec<HoneycombEvent>,
+        events: Vec<AxiomEvent>,
         induce_failure: bool,
     }
 
@@ -469,9 +469,9 @@ mod tests {
         }
     }
 
-    fn new_event(span_id: Option<u64>) -> HoneycombEvent {
-        HoneycombEvent {
-            time: OffsetDateTime::now_utc(),
+    fn new_event(span_id: Option<u64>) -> AxiomEvent {
+        AxiomEvent {
+            _time: OffsetDateTime::now_utc(),
             span_id: span_id.map(|i| SpanId::from(NonZeroU64::new(i).unwrap())),
             trace_id: None,
             parent_span_id: None,
@@ -527,8 +527,8 @@ mod tests {
 
         // add to queue while task is not processing new events
         sender
-            .blocking_send(Some(HoneycombEvent {
-                time: evt.time,
+            .blocking_send(Some(AxiomEvent {
+                _time: evt._time,
                 span_id: Some(SpanId::from(NonZeroU64::new(1).unwrap())),
                 ..evt.clone()
             }))
@@ -663,7 +663,7 @@ mod tests {
     }
 
     async fn middleware_auth_with_mock_key(request: Request, next: Next) -> Response {
-        let api_key = match request.headers().get(HONEYCOMB_AUTH_HEADER_NAME) {
+        let api_key = match request.headers().get(AXIOM_AUTH_HEADER_NAME) {
             None => {
                 return (
                     StatusCode::UNAUTHORIZED,
@@ -847,7 +847,7 @@ mod tests {
             .event(
                 expect::event()
                     .at_level(Level::ERROR)
-                    .with_fields(expect::msg("couldn't send logs to honeycomb"))
+                    .with_fields(expect::msg("couldn't send logs to axiom"))
                     .with_fields(expect::field("error")), // the underlying reqwest error
             )
             .run_with_handle();
