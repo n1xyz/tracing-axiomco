@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc;
-use tracing_honeycombio::{
+use tracing_axiomco::{
     CreateEventsPayload, Value,
     background::{Backend, BackgroundTaskFut},
     builder::DEFAULT_CHANNEL_SIZE,
@@ -58,7 +58,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             ];
 
             let (sender, receiver) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
-            let layer = tracing_honeycombio::layer::Layer::new(
+            let layer = tracing_axiomco::layer::Layer::new(
                 black_box(Some("my-cool-service-name".into())),
                 black_box(sender.clone()),
             );
