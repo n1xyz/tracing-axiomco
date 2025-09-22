@@ -174,7 +174,7 @@ pub fn builder(api_key: &str) -> Builder {
         .expect("api_key to be a valid HTTP header value");
     auth_value.set_sensitive(true);
     builder.http_headers.insert(
-        header::HeaderName::from_static(AXIOM_AUTH_HEADER_NAME), 
+        header::HeaderName::from_static(AXIOM_AUTH_HEADER_NAME),
         auth_value,
     );
     builder

@@ -172,7 +172,7 @@ impl From<HashMap<Cow<'static, str>, Value>> for Fields {
     }
 }
 
-impl Visit for Fields { 
+impl Visit for Fields {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         self.record(field, format!("{:?}", value));
     }
