@@ -630,7 +630,7 @@ mod tests {
         assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
     }
 
-    const MOCK_API_KEY: &str = "xxx-testing-api-key-xxx";
+    const MOCK_API_KEY: &str = "Bearer xxx-testing-api-key-xxx";
     const TESTING_HEADER_NAME: &str = "x-tested-header";
     const TESTING_HEADER_VALUE: &str = "tested-header-value";
     const TEST_EXTRA_FIELD_NAME: &str = "test.extra_field";
@@ -713,6 +713,7 @@ mod tests {
         Path(dataset): Path<String>,
         Json(payload): Json<DatasetPayload>,
     ) -> Response {
+        
         assert_eq!(
             headers
                 .get(TESTING_HEADER_NAME)
@@ -761,7 +762,7 @@ mod tests {
         (
             state.clone(),
             Router::new()
-                .route("/1/batch/{dataset}", post(post_create_events))
+                .route("/v1/datasets/{dataset_name}/ingest", post(post_create_events))
                 .layer(middleware::from_fn(middleware_zstd_decompress))
                 .layer(middleware::from_fn(middleware_auth_with_mock_key))
                 .with_state(state),
@@ -777,12 +778,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn end_to_end_submit() {
+    async fn end_to_end_submit() { // TODO test failed
         let _default = tracing::subscriber::set_default(
             tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()),
         );
         let (api_host, state, serve_task) = run_mock_server().await;
-        let (layer, bg_task, bg_task_controller) = crate::builder(MOCK_API_KEY)
+        let (layer, bg_task, bg_task_controller) = crate::builder(MOCK_API_KEY) // TODO failed here
             .extra_field(
                 TEST_EXTRA_FIELD_NAME.into(),
                 Cow::Borrowed(TEST_EXTRA_FIELD_VALUE).into(),
@@ -792,7 +793,6 @@ mod tests {
             .unwrap()
             .build(&api_host, TESTING_DATASET)
             .unwrap();
-
         let _server_join_handle = tokio::spawn(serve_task.with_current_subscriber());
         let bg_join_handle = tokio::spawn(bg_task.with_current_subscriber());
 
@@ -810,6 +810,7 @@ mod tests {
 
         // get an exclusive copy so that we don't have to go through the lock all the time
         let datasets = state.datasets.read().unwrap().clone();
+        
         assert_eq!(datasets.len(), 1, "expected single dataset");
         let test_dataset = datasets
             .get(TESTING_DATASET)
@@ -838,7 +839,10 @@ mod tests {
             log_event.get(OTEL_FIELD_PARENT_ID),
             Some(span_event.get(OTEL_FIELD_SPAN_ID).unwrap())
         );
-        assert_eq!(span_event.get(OTEL_FIELD_TRACE_ID), Some(trace_id));
+        assert_eq!(dbg!(span_event.get(OTEL_FIELD_TRACE_ID)), dbg!(Some(trace_id))); // TODO len = 0, index = 0
+        
+
+        
     }
 
     #[tokio::test]
@@ -864,7 +868,7 @@ mod tests {
         );
 
         let (api_host, state, serve_task) = run_mock_server().await;
-        let (honey_layer, bg_task, bg_task_controller) = crate::builder(MOCK_API_KEY)
+        let (honey_layer, bg_task, bg_task_controller) = crate::builder(MOCK_API_KEY) // TODO failed here
             .extra_field(
                 TEST_EXTRA_FIELD_NAME.into(),
                 Cow::Borrowed(TEST_EXTRA_FIELD_VALUE).into(),
@@ -913,6 +917,6 @@ mod tests {
             datasets.values().next().unwrap().len(),
             1,
             "expected single event in dataset"
-        );
+        ); // TODO failed here too 
     }
 }

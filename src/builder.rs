@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 pub const AXIOM_SERVER_US: &str = "https://api.axiom.co/";
 pub const AXIOM_SERVER_EU: &str = "https://api.eu.axiom.co/";
 
-pub const AXIOM_AUTH_HEADER_NAME: &str = "Authorization";
+pub const AXIOM_AUTH_HEADER_NAME: &str = "authorization";
 
 pub const DEFAULT_CHANNEL_SIZE: usize = 1024;
 
@@ -124,8 +124,7 @@ impl Builder {
         // ref: https://axiom.co/docs/restapi/ingest
         let endpoint = Url::parse(api_host)
             .and_then(|host| host.join("v1/datasets/"))
-            .and_then(|endpoint| endpoint.join(dataset_name))
-            .and_then(|endpoint| endpoint.join("/ingest"))
+            .and_then(|endpoint| endpoint.join(&format!("{}/ingest", dataset_name)))
             .map_err(|_| InvalidEndpointConfig {
                 api_host: api_host.to_string(),
                 dataset_name: dataset_name.to_string(),
@@ -171,11 +170,11 @@ pub fn builder(api_key: &str) -> Builder {
         http_headers: HeaderMap::new(),
         event_channel_size: DEFAULT_CHANNEL_SIZE,
     };
-    let mut auth_value = header::HeaderValue::from_str(&format!("Bearer {}", api_key))
+    let mut auth_value = header::HeaderValue::from_str(/*&format!("Bearer {}",*/ api_key)
         .expect("api_key to be a valid HTTP header value");
     auth_value.set_sensitive(true);
     builder.http_headers.insert(
-        header::HeaderName::from_static(AXIOM_AUTH_HEADER_NAME),
+        header::HeaderName::from_static(AXIOM_AUTH_HEADER_NAME), 
         auth_value,
     );
     builder

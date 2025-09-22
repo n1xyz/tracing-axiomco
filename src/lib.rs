@@ -81,6 +81,7 @@ impl From<f64> for Value {
             .map(Self::Number)
             // this is a little slimy but good behavior for honeycomb specifically
             // there's not really much else since we don't have a Null variant
+            // TODO null variant for axiom?
             .unwrap_or_else(|| Self::String(format!("{}", f).into()))
     }
 }
@@ -171,7 +172,7 @@ impl From<HashMap<Cow<'static, str>, Value>> for Fields {
     }
 }
 
-impl Visit for Fields {
+impl Visit for Fields { 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         self.record(field, format!("{:?}", value));
     }

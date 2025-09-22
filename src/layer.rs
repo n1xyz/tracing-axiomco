@@ -394,7 +394,7 @@ pub(crate) mod tests {
         );
         assert_eq!(ev_map.get(OTEL_FIELD_LEVEL), Some(&json!("info")));
         assert!(
-            before <= log_event.time && log_event.time <= after,
+            before <= log_event._time && log_event._time <= after,
             "invalid timestamp: {:#?}",
             ev_map.get(OTEL_FIELD_TIMESTAMP)
         );
