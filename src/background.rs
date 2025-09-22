@@ -841,10 +841,7 @@ mod tests {
             log_event.get(OTEL_FIELD_PARENT_ID),
             Some(span_event.get(OTEL_FIELD_SPAN_ID).unwrap())
         );
-        assert_eq!(
-            dbg!(span_event.get(OTEL_FIELD_TRACE_ID)),
-            dbg!(Some(trace_id))
-        );
+        assert_eq!(span_event.get(OTEL_FIELD_TRACE_ID), Some(trace_id));
     }
 
     #[tokio::test]
