@@ -91,7 +91,7 @@ impl Backend for ClientBackend {
                     .expect("none of the tracing field types can fail to serialize and zstd compression should succeed");
         encoder.finish().expect("zstd compression should succeed");
 
-        let request_builder = self.http_client.post(self.axiom_endpoint_url.clone()); // TODO make sure callgraph inputs correctly
+        let request_builder = self.http_client.post(self.axiom_endpoint_url.clone());
         Box::pin(
             async move {
                 let resp = request_builder
@@ -781,12 +781,11 @@ mod tests {
 
     #[tokio::test]
     async fn end_to_end_submit() {
-        // TODO test failed
         let _default = tracing::subscriber::set_default(
             tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()),
         );
         let (api_host, state, serve_task) = run_mock_server().await;
-        let (layer, bg_task, bg_task_controller) = crate::builder(MOCK_API_KEY) // TODO failed here
+        let (layer, bg_task, bg_task_controller) = crate::builder(MOCK_API_KEY)
             .extra_field(
                 TEST_EXTRA_FIELD_NAME.into(),
                 Cow::Borrowed(TEST_EXTRA_FIELD_VALUE).into(),
@@ -845,7 +844,7 @@ mod tests {
         assert_eq!(
             dbg!(span_event.get(OTEL_FIELD_TRACE_ID)),
             dbg!(Some(trace_id))
-        ); // TODO len = 0, index = 0
+        );
     }
 
     #[tokio::test]
@@ -871,7 +870,7 @@ mod tests {
         );
 
         let (api_host, state, serve_task) = run_mock_server().await;
-        let (honey_layer, bg_task, bg_task_controller) = crate::builder(MOCK_API_KEY) // TODO failed here
+        let (honey_layer, bg_task, bg_task_controller) = crate::builder(MOCK_API_KEY)
             .extra_field(
                 TEST_EXTRA_FIELD_NAME.into(),
                 Cow::Borrowed(TEST_EXTRA_FIELD_VALUE).into(),
@@ -920,6 +919,6 @@ mod tests {
             datasets.values().next().unwrap().len(),
             1,
             "expected single event in dataset"
-        ); // TODO failed here too 
+        );
     }
 }

@@ -81,7 +81,6 @@ impl From<f64> for Value {
             .map(Self::Number)
             // this is a little slimy but good behavior for honeycomb specifically
             // there's not really much else since we don't have a Null variant
-            // TODO null variant for axiom?
             .unwrap_or_else(|| Self::String(format!("{}", f).into()))
     }
 }
@@ -313,7 +312,6 @@ impl Serialize for TraceId {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxiomEvent {
-    // TODO look into doc more for axiom specific field requirements
     // see https://axiom.co/docs/reference/field-restrictions for timestamp field requirements on Axiom
     pub _time: OffsetDateTime,
     pub span_id: Option<SpanId>,
