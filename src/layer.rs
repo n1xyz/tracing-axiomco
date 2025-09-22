@@ -362,7 +362,7 @@ pub(crate) mod tests {
         assert_eq!(
             events
                 .iter()
-                .map(|evt| (evt.fields.fields.get("overridden_field")))
+                .map(|evt| evt.fields.fields.get("overridden_field"))
                 .collect::<Vec<_>>(),
             vec![
                 (Some(&or_val_e.into())),  // the event
