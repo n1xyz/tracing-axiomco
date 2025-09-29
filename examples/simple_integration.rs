@@ -5,7 +5,7 @@ use tracing::Level;
 use tracing_subscriber::{Layer, filter::LevelFilter, layer::SubscriberExt};
 
 const AXIOM_TEST_DATASET_NAME: &str = "porting_test";
-const AXIOM_API_KEY: &str = "xaat-0d5d7b05-4e4e-4ae5-9126-dbf6af1923f1";
+const AXIOM_API_KEY: &str = "xaat-0d5d7b05-4e4e-4ae5-9126-dbf6af1923f1"; // TODO remove this hardcoded key before merging 
 
 // thread_local! {
 //     static CURRENT_RNG: RefCell<rngs::SmallRng> = RefCell::new(SeedableRng::from_os_rng());
@@ -32,7 +32,7 @@ const AXIOM_API_KEY: &str = "xaat-0d5d7b05-4e4e-4ae5-9126-dbf6af1923f1";
 
 // TODO update comments
 // the following tests integrates load testing (spawning 8 threads and 125 spans each, total of 1000 spans) and also directly interfaces with the axiom server
-#[tokio::main(flavor = "multi_thread", worker_threads = 6)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {
     // let api_key =
     //     std::env::var("AXIOM_API_KEY").expect("AXIOM_API_KEY environment variable to be valid");
@@ -41,33 +41,33 @@ async fn main() {
         .unwrap();
     let handle = tokio::spawn(task);
     let subscriber = tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(LevelFilter::DEBUG)) // TODO temporarily disable console logging
+        .with(tracing_subscriber::fmt::layer().with_filter(LevelFilter::DEBUG)) // TODO temporarily level filter
         .with(layer);
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let mut tasks = Vec::new();
 
-    for work_id in 0..6 {
+    for work_id in 0..5 {
         tasks.push(tokio::spawn(async move {
             for i in 0..85 {
                 let top_span = tracing::span!(
                     Level::INFO,
                     "top span",
                     work_id = work_id,
-                    top_span_iteration = i
+                    span_iteration = i
                 );
 
                 let _enter = top_span.enter();
 
                 {
                     let nested_span =
-                        tracing::span!(Level::TRACE, "nested span", nested_span_iteration = i);
+                        tracing::span!(Level::TRACE, "nested span", span_iteration = i);
                     let _nested_enter = nested_span.enter();
 
                     let msg: String = format!("random event No. {i}");
 
-                    tracing::event!(Level::WARN, message = msg, event_iteration = i);
+                    tracing::event!(Level::TRACE, message = msg, event_iteration = i);
                 }
             }
         }))

@@ -156,7 +156,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         event.record(&mut fields);
         // don't care if channel closed. if capacity is reached, we have larger problems
         let _ = self.sender.try_send(Some(AxiomEvent {
-            _time: timestamp,
+            time: timestamp,
             span_id: None,
             trace_id: span
                 .as_ref()
@@ -221,7 +221,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         let trace_id = span.extensions_mut().remove::<TraceId>();
 
         let _ = self.sender.try_send(Some(AxiomEvent {
-            _time: timestamp,
+            time: timestamp,
             span_id: span.extensions_mut().remove::<SpanId>(),
             trace_id,
             parent_span_id: span

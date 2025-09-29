@@ -11,8 +11,6 @@ use tokio::sync::mpsc;
 pub const AXIOM_SERVER_US: &str = "https://api.axiom.co/";
 pub const AXIOM_SERVER_EU: &str = "https://api.eu.axiom.co/";
 
-pub const AXIOM_AUTH_HEADER_NAME: &str = "authorization";
-
 pub const DEFAULT_CHANNEL_SIZE: usize = 1024;
 
 /// Builder for constructing a [`Layer`] and its corresponding
@@ -173,9 +171,8 @@ pub fn builder(api_key: &str) -> Builder {
     let mut auth_value =
         header::HeaderValue::from_str(api_key).expect("api_key to be a valid HTTP header value");
     auth_value.set_sensitive(true);
-    builder.http_headers.insert(
-        header::HeaderName::from_static(AXIOM_AUTH_HEADER_NAME),
-        auth_value,
-    );
+    builder
+        .http_headers
+        .insert(header::AUTHORIZATION, auth_value);
     builder
 }

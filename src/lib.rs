@@ -16,7 +16,7 @@ pub mod background;
 pub mod builder;
 pub mod layer;
 
-pub use builder::{AXIOM_AUTH_HEADER_NAME, AXIOM_SERVER_EU, AXIOM_SERVER_US, Builder, builder};
+pub use builder::{AXIOM_SERVER_EU, AXIOM_SERVER_US, Builder, builder};
 pub use reqwest::Url;
 
 pub const OTEL_FIELD_SPAN_ID: &str = "trace.span_id";
@@ -313,7 +313,7 @@ impl Serialize for TraceId {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxiomEvent {
     // see https://axiom.co/docs/reference/field-restrictions for timestamp field requirements on Axiom
-    pub _time: OffsetDateTime,
+    pub time: OffsetDateTime,
     pub span_id: Option<SpanId>,
     pub trace_id: Option<TraceId>,
     pub parent_span_id: Option<SpanId>,
@@ -374,9 +374,9 @@ impl Serialize for AxiomEvent {
     {
         let mut root = serializer.serialize_map(None)?;
         root.serialize_entry(
-            "time",
+            "_time",
             &self
-                ._time
+                .time
                 .format(&time::format_description::well_known::Rfc3339)
                 .map_err(serde::ser::Error::custom)?,
         )?;
@@ -434,10 +434,10 @@ impl<'a> Serialize for CreateEventPayload<'a> {
     {
         let mut root = serializer.serialize_map(None)?;
         root.serialize_entry(
-            "time",
+            "_time",
             &self
                 .event
-                ._time
+                .time
                 .format(&time::format_description::well_known::Rfc3339)
                 .map_err(serde::ser::Error::custom)?,
         )?;

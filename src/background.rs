@@ -33,6 +33,8 @@ impl std::error::Error for BadRedirect {}
 fn report(mut err: &(dyn std::error::Error + 'static)) -> String {
     use std::fmt::Write as _;
     let mut s = format!("{}", err);
+    // TODO debug stuff
+    eprintln!("Error sending to Axiom: {}", s);
     while let Some(src) = err.source() {
         let _ = write!(s, ": {}", src);
         err = src;
@@ -102,10 +104,13 @@ impl Backend for ClientBackend {
                     .await
                     .map_err(|e| report(&e))?;
                 let status = resp.status();
+                eprintln!("Axiom response status: {}", status); // TODO debug stuff
                 if !status.is_success() {
                     let body = resp.text().await.map_err(|e| -> Self::Err {
                         format!("HTTP error {}, decoding body failed: {}", status, e).into()
                     })?;
+                    // TODO another check
+                    tracing::error!("HTTP error {}: {:#?}", status, body);
                     return Err(format!("HTTP error {}: {:#?}", status, body).into());
                 }
                 Ok(())
@@ -406,8 +411,8 @@ impl BackgroundTaskController {
 mod tests {
     use super::*;
     use crate::{
-        AXIOM_AUTH_HEADER_NAME, CreateEventsPayload, OTEL_FIELD_LEVEL, OTEL_FIELD_PARENT_ID,
-        OTEL_FIELD_SPAN_ID, OTEL_FIELD_TRACE_ID, SpanId, builder::DEFAULT_CHANNEL_SIZE,
+        CreateEventsPayload, OTEL_FIELD_LEVEL, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID,
+        OTEL_FIELD_TRACE_ID, SpanId, builder::DEFAULT_CHANNEL_SIZE,
     };
     use axum::{
         Json, Router,
@@ -471,7 +476,7 @@ mod tests {
 
     fn new_event(span_id: Option<u64>) -> AxiomEvent {
         AxiomEvent {
-            _time: OffsetDateTime::now_utc(),
+            time: OffsetDateTime::now_utc(),
             span_id: span_id.map(|i| SpanId::from(NonZeroU64::new(i).unwrap())),
             trace_id: None,
             parent_span_id: None,
@@ -663,7 +668,7 @@ mod tests {
     }
 
     async fn middleware_auth_with_mock_key(request: Request, next: Next) -> Response {
-        let api_key = match request.headers().get(AXIOM_AUTH_HEADER_NAME) {
+        let api_key = match request.headers().get(reqwest::header::AUTHORIZATION) {
             None => {
                 return (
                     StatusCode::UNAUTHORIZED,
