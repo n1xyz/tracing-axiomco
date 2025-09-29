@@ -533,7 +533,7 @@ mod tests {
         // add to queue while task is not processing new events
         sender
             .blocking_send(Some(AxiomEvent {
-                _time: evt._time,
+                time: evt.time,
                 span_id: Some(SpanId::from(NonZeroU64::new(1).unwrap())),
                 ..evt.clone()
             }))
