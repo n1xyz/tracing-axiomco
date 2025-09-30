@@ -411,7 +411,7 @@ impl BackgroundTaskController {
 mod tests {
     use super::*;
     use crate::{
-        CreateEventsPayload, OTEL_FIELD_LEVEL, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID,
+        CreateEventsPayload, EVENT_LEVEL, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID,
         OTEL_FIELD_TRACE_ID, SpanId, builder::DEFAULT_CHANNEL_SIZE,
     };
     use axum::{
@@ -489,6 +489,7 @@ mod tests {
             name: Cow::Borrowed("name"),
             target: Cow::Borrowed("target"),
             fields: Default::default(),
+            kind: "client",
         }
     }
 
@@ -830,7 +831,7 @@ mod tests {
         let log_event = &test_dataset[0];
         assert_eq!(log_event.get("event.field"), Some(&json!(41)));
         assert_eq!(log_event.get("span.field"), Some(&json!(40)));
-        assert_eq!(log_event.get(OTEL_FIELD_LEVEL), Some(&json!("info")));
+        assert_eq!(log_event.get(EVENT_LEVEL), Some(&json!("info")));
         assert_eq!(log_event.get("target"), Some(&json!("test-target")));
         assert_eq!(log_event.get("name"), Some(&json!("test-name")));
         let trace_id = log_event.get(OTEL_FIELD_TRACE_ID).unwrap();
@@ -838,7 +839,7 @@ mod tests {
         let span_event = &test_dataset[1];
         assert_eq!(span_event.get("event.field"), None);
         assert_eq!(span_event.get("span.field"), Some(&json!(40)));
-        assert_eq!(span_event.get(OTEL_FIELD_LEVEL), Some(&json!("warn")));
+        assert_eq!(span_event.get(EVENT_LEVEL), Some(&json!("warn")));
         assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
         assert_eq!(span_event.get("name"), Some(&json!("span name")));
         assert!(span_event.get(OTEL_FIELD_SPAN_ID).is_some());

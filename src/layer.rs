@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tracing::{Level, Subscriber, span};
 use tracing_subscriber::registry::LookupSpan;
 
-use crate::{AxiomEvent, Fields, SpanId, TraceId};
+use crate::{AxiomEvent, Fields, SpanId, SpanKind, TraceId};
 
 fn level_as_axiom_str(level: &Level) -> &'static str {
     match *level {
@@ -14,6 +14,16 @@ fn level_as_axiom_str(level: &Level) -> &'static str {
         Level::INFO => "info",
         Level::WARN => "warn",
         Level::ERROR => "error",
+    }
+}
+
+fn kind_as_axiom_str(kind: &SpanKind) -> &'static str {
+    match *kind {
+        SpanKind::INTERNAL => "internal",
+        SpanKind::SERVER => "server",
+        SpanKind::CLIENT => "client",
+        SpanKind::PRODUCER => "producer",
+        SpanKind::CONSUMER => "consumer",
     }
 }
 
@@ -171,6 +181,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             name: Cow::Borrowed(meta.name()),
             target: Cow::Borrowed(meta.target()),
             fields,
+            kind: kind_as_axiom_str(&SpanKind::INTERNAL),
         }));
     }
 
@@ -236,6 +247,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             name: Cow::Borrowed(meta.name()),
             target: Cow::Borrowed(meta.target()),
             fields,
+            kind: kind_as_axiom_str(&SpanKind::INTERNAL),
         }));
     }
 }
@@ -243,8 +255,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::{
-        OTEL_FIELD_LEVEL, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SERVICE_NAME, OTEL_FIELD_SPAN_ID,
-        OTEL_FIELD_TIMESTAMP,
+        EVENT_LEVEL, EVENT_TIMESTAMP, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SERVICE_NAME,
+        OTEL_FIELD_SPAN_ID,
     };
 
     use super::*;
@@ -392,11 +404,11 @@ pub(crate) mod tests {
             ev_map.get(OTEL_FIELD_SERVICE_NAME),
             Some(&json!("service_name"))
         );
-        assert_eq!(ev_map.get(OTEL_FIELD_LEVEL), Some(&json!("info")));
+        assert_eq!(ev_map.get(EVENT_LEVEL), Some(&json!("info")));
         assert!(
             before <= log_event.time && log_event.time <= after,
             "invalid timestamp: {:#?}",
-            ev_map.get(OTEL_FIELD_TIMESTAMP)
+            ev_map.get(EVENT_TIMESTAMP)
         );
         // "name" field is based on line number so cannot be easily checked
         assert_eq!(

@@ -19,18 +19,20 @@ pub mod layer;
 pub use builder::{AXIOM_SERVER_EU, AXIOM_SERVER_US, Builder, builder};
 pub use reqwest::Url;
 
-pub const OTEL_FIELD_SPAN_ID: &str = "trace.span_id";
-pub const OTEL_FIELD_TRACE_ID: &str = "trace.trace_id";
-pub const OTEL_FIELD_PARENT_ID: &str = "trace.parent_id";
-pub const OTEL_FIELD_SERVICE_NAME: &str = "service.name";
-pub const OTEL_FIELD_LEVEL: &str = "level";
+// see https://axiom.co/docs/query-data/traces?utm_source=chatgpt.com#trace-schema-overview for Axiom trace schema
+pub const OTEL_FIELD_SPAN_ID: &str = "span_id";
+pub const OTEL_FIELD_TRACE_ID: &str = "trace_id";
+pub const OTEL_FIELD_PARENT_ID: &str = "parent_span_id";
 pub const OTEL_FIELD_NAME: &str = "name";
-pub const OTEL_FIELD_TARGET: &str = "target";
-pub const OTEL_FIELD_TIMESTAMP: &str = "timestamp";
-pub const OTEL_FIELD_DURATION_MS: &str = "duration_ms";
-pub const OTEL_FIELD_ANNOTATION_TYPE: &str = "meta.annotation_type";
-pub const FIELD_IDLE_NS: &str = "idle_ns";
-pub const FIELD_BUSY_NS: &str = "busy_ns";
+pub const OTEL_FIELD_KIND: &str = "kind";
+pub const OTEL_FIELD_DURATION_MS: &str = "duration";
+pub const OTEL_FIELD_SERVICE_NAME: &str = "service.name";
+pub const EVENT_LEVEL: &str = "level";
+pub const EVENT_TARGET: &str = "target";
+pub const EVENT_TIMESTAMP: &str = "timestamp";
+pub const ATTR_ANNOTATION_TYPE: &str = "meta.annotation_type";
+pub const ATTR_IDLE_NS: &str = "idle_ns";
+pub const ATTR_BUSY_NS: &str = "busy_ns";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Value {
@@ -147,10 +149,11 @@ pub struct Fields {
 // trace.parent_id
 // service.name
 // level
-// Timestamp
+// timestamp
 // name
 // target
 // duration_ms
+// kind
 
 impl Fields {
     pub fn new() -> Self {
@@ -310,9 +313,18 @@ impl Serialize for TraceId {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Copy, Hash, Debug)]
+pub enum SpanKind {
+    CLIENT,
+    INTERNAL,
+    SERVER,
+    PRODUCER,
+    CONSUMER,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxiomEvent {
-    // see https://axiom.co/docs/reference/field-restrictions for timestamp field requirements on Axiom
+    // see https://axiom.co/docs/query-data/traces#browse-traces-with-the-opentelemetry-app for required field names
     pub time: OffsetDateTime,
     pub span_id: Option<SpanId>,
     pub trace_id: Option<TraceId>,
@@ -326,6 +338,7 @@ pub struct AxiomEvent {
     pub name: Cow<'static, str>,
     pub target: Cow<'static, str>,
     pub fields: Fields,
+    pub kind: &'static str,
 }
 
 impl AxiomEvent {
@@ -346,20 +359,20 @@ impl AxiomEvent {
             m.serialize_entry(OTEL_FIELD_SERVICE_NAME, service_name)?;
         }
         if let Some(ref annotation_type) = self.annotation_type {
-            m.serialize_entry(OTEL_FIELD_ANNOTATION_TYPE, annotation_type)?;
+            m.serialize_entry(ATTR_ANNOTATION_TYPE, annotation_type)?;
         }
         if let Some(ref duration_ms) = self.duration_ms {
             m.serialize_entry(OTEL_FIELD_DURATION_MS, duration_ms)?;
         }
         if let Some(ref idle_ns) = self.idle_ns {
-            m.serialize_entry(FIELD_IDLE_NS, idle_ns)?;
+            m.serialize_entry(ATTR_IDLE_NS, idle_ns)?;
         }
         if let Some(ref busy_ns) = self.busy_ns {
-            m.serialize_entry(FIELD_BUSY_NS, busy_ns)?;
+            m.serialize_entry(ATTR_BUSY_NS, busy_ns)?;
         }
-        m.serialize_entry(OTEL_FIELD_LEVEL, self.level)?;
+        m.serialize_entry(EVENT_LEVEL, self.level)?;
         m.serialize_entry(OTEL_FIELD_NAME, self.name.as_ref())?;
-        m.serialize_entry(OTEL_FIELD_TARGET, self.target.as_ref())?;
+        m.serialize_entry(EVENT_TARGET, self.target.as_ref())?;
         for (k, v) in self.fields.fields.iter() {
             m.serialize_entry(k, v)?;
         }
