@@ -509,18 +509,22 @@ impl<'a> Serialize for CreateEventPayload<'a> {
         root.serialize_entry("events", &EventsField(self.event))?;
 
         // attributes field
-        struct AttrField<'a>(&'a AxiomEvent);
+        struct AttrField<'a>(&'a AxiomEvent, &'a ExtraFields);
         impl<'a> Serialize for AttrField<'a> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
                 let mut m = serializer.serialize_map(None)?;
+                for (k, v) in self.1.iter() {
+                    m.serialize_entry(k, v)?;
+                }
+
                 self.0.serialize_attr_field(&mut m)?;
                 m.end()
             }
         }
-        root.serialize_entry("attributes", &AttrField(self.event))?;
+        root.serialize_entry("attributes", &AttrField(self.event, self.extra_fields))?;
 
         // resources field
         struct ResourcesField<'a>(&'a AxiomEvent);

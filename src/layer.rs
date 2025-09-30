@@ -178,9 +178,10 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             idle_ns: None,
             busy_ns: None,
             level: level_as_axiom_str(meta.level()),
-            name: Cow::Borrowed(meta.name()),
+            event_name: Cow::Borrowed(meta.name()),
             target: Cow::Borrowed(meta.target()),
-            fields,
+            name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
+            event_field: fields,
             kind: kind_as_axiom_str(&SpanKind::INTERNAL),
         }));
     }
@@ -244,9 +245,10 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             idle_ns,
             busy_ns,
             level: level_as_axiom_str(meta.level()),
-            name: Cow::Borrowed(meta.name()),
+            event_name: Cow::Borrowed(meta.name()),
             target: Cow::Borrowed(meta.target()),
-            fields,
+            name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
+            event_field: fields,
             kind: kind_as_axiom_str(&SpanKind::INTERNAL),
         }));
     }
@@ -374,7 +376,7 @@ pub(crate) mod tests {
         assert_eq!(
             events
                 .iter()
-                .map(|evt| evt.fields.fields.get("overridden_field"))
+                .map(|evt| evt.event_field.fields.get("overridden_field"))
                 .collect::<Vec<_>>(),
             vec![
                 (Some(&or_val_e.into())),  // the event
@@ -393,6 +395,7 @@ pub(crate) mod tests {
             ),
         };
         let ev_map = match root.get("data").unwrap() {
+            // TODO change key
             Value::Object(data) => data,
             _ => panic!("data key has unexpected type"),
         };
@@ -427,7 +430,7 @@ pub(crate) mod tests {
 
         let child_closing_event = events.get(1).unwrap();
         assert_eq!(
-            child_closing_event.fields.fields.get("child_field"),
+            child_closing_event.event_field.fields.get("child_field"),
             Some(&42.into())
         );
 
@@ -481,7 +484,10 @@ pub(crate) mod tests {
         let mut events = Vec::with_capacity(1);
         assert_eq!(receiver.blocking_recv_many(&mut events, 128), 3);
         let event = events[0].take().unwrap();
-        assert_eq!(event.fields.fields.get("message"), Some(&"message".into()));
+        assert_eq!(
+            event.event_field.fields.get("message"),
+            Some(&"message".into())
+        );
         assert_eq!(event.span_id, None);
         assert_eq!(event.parent_span_id, Some(parent_id));
     }

@@ -487,8 +487,9 @@ mod tests {
             idle_ns: None,
             level: "INFO",
             name: Cow::Borrowed("name"),
+            event_name: Cow::Borrowed("event name"),
             target: Cow::Borrowed("target"),
-            fields: Default::default(),
+            event_field: Default::default(),
             kind: "client",
         }
     }
