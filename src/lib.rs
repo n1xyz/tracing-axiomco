@@ -26,13 +26,15 @@ pub const OTEL_FIELD_PARENT_ID: &str = "parent_span_id";
 pub const OTEL_FIELD_NAME: &str = "name";
 pub const OTEL_FIELD_KIND: &str = "kind";
 pub const OTEL_FIELD_DURATION_MS: &str = "duration";
-pub const OTEL_FIELD_SERVICE_NAME: &str = "service.name";
 pub const EVENT_LEVEL: &str = "level";
-pub const EVENT_TARGET: &str = "target";
-pub const EVENT_TIMESTAMP: &str = "timestamp";
+pub const EVENT_TIMESTAMP: &str = "_time";
+pub const EVENT_NAME: &str = "name";
+pub const EVENT_FIELD: &str = "attributes";
 pub const ATTR_ANNOTATION_TYPE: &str = "meta.annotation_type";
 pub const ATTR_IDLE_NS: &str = "idle_ns";
 pub const ATTR_BUSY_NS: &str = "busy_ns";
+pub const ATTR_TARGET: &str = "target";
+pub const RESOURCES_SERVICE_NAME: &str = "service.name";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Value {
@@ -144,16 +146,21 @@ pub struct Fields {
 }
 
 // list of reserved field names (case insensitive):
-// trace.span_id
-// trace.trace_id
-// trace.parent_id
-// service.name
-// level
-// timestamp
+// trace_id
+// span_id
+// parent_span_id
 // name
-// target
-// duration_ms
 // kind
+// duration
+// [resources] service.name
+// [events] _time
+// [events] event_name
+// [events] level
+// [events] event_field
+// [attributes] annotation_type
+// [attributes] idle_ns
+// [attributes] busy_ns
+// [attributes] target
 
 impl Fields {
     pub fn new() -> Self {
@@ -325,56 +332,97 @@ pub enum SpanKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AxiomEvent {
     // see https://axiom.co/docs/query-data/traces#browse-traces-with-the-opentelemetry-app for required field names
-    pub time: OffsetDateTime,
+    // first level fields
     pub span_id: Option<SpanId>,
     pub trace_id: Option<TraceId>,
     pub parent_span_id: Option<SpanId>,
-    pub service_name: Option<Cow<'static, str>>,
-    pub annotation_type: Option<Cow<'static, str>>,
+    pub kind: &'static str,
+    pub name: Cow<'static, str>,
     pub duration_ms: Option<u64>,
+    // attributes field
+    pub annotation_type: Option<Cow<'static, str>>,
     pub idle_ns: Option<u64>,
     pub busy_ns: Option<u64>,
-    pub level: &'static str,
-    pub name: Cow<'static, str>,
     pub target: Cow<'static, str>,
-    pub fields: Fields,
-    pub kind: &'static str,
+    // events field
+    pub time: OffsetDateTime,
+    pub event_name: Cow<'static, str>,
+    pub level: &'static str,
+    pub event_field: Fields,
+    // resources field
+    pub service_name: Option<Cow<'static, str>>,
 }
 
 impl AxiomEvent {
-    fn serialize_data_fields<M: SerializeMap>(
+    fn serialize_otel_field<M: SerializeMap>(
         &self,
         m: &mut M,
     ) -> Result<(), <M as SerializeMap>::Error> {
-        if let Some(ref span_id) = self.span_id {
-            m.serialize_entry(OTEL_FIELD_SPAN_ID, span_id)?;
+        // first level fields
+        if let Some(span_id) = self.span_id {
+            m.serialize_entry(OTEL_FIELD_SPAN_ID, &span_id)?;
         }
-        if let Some(ref trace_id) = self.trace_id {
-            m.serialize_entry(OTEL_FIELD_TRACE_ID, trace_id)?;
+        if let Some(trace_id) = self.trace_id {
+            m.serialize_entry(OTEL_FIELD_TRACE_ID, &trace_id)?;
         }
-        if let Some(ref parent_span_id) = self.parent_span_id {
-            m.serialize_entry(OTEL_FIELD_PARENT_ID, parent_span_id)?;
+        if let Some(parent_span_id) = self.parent_span_id {
+            m.serialize_entry(OTEL_FIELD_PARENT_ID, &parent_span_id)?;
         }
-        if let Some(ref service_name) = self.service_name {
-            m.serialize_entry(OTEL_FIELD_SERVICE_NAME, service_name)?;
+        if let Some(duration_ms) = self.duration_ms {
+            m.serialize_entry(OTEL_FIELD_DURATION_MS, &duration_ms)?;
         }
+        m.serialize_entry(OTEL_FIELD_NAME, self.name.as_ref())?;
+        m.serialize_entry(OTEL_FIELD_KIND, self.kind)?;
+
+        Ok(())
+    }
+
+    fn serialize_events_field<M: SerializeMap>(
+        &self,
+        m: &mut M,
+    ) -> Result<(), <M as SerializeMap>::Error> {
+        m.serialize_entry(
+            EVENT_TIMESTAMP,
+            &self
+                .time
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(serde::ser::Error::custom)?,
+        )?;
+
+        m.serialize_entry(EVENT_NAME, self.event_name.as_ref())?;
+
+        m.serialize_entry(EVENT_LEVEL, self.level)?;
+
+        for (k, v) in self.event_field.fields.iter() {
+            m.serialize_entry(k, v)?;
+        }
+
+        Ok(())
+    }
+
+    fn serialize_attr_field<M: SerializeMap>(
+        &self,
+        m: &mut M,
+    ) -> Result<(), <M as SerializeMap>::Error> {
         if let Some(ref annotation_type) = self.annotation_type {
             m.serialize_entry(ATTR_ANNOTATION_TYPE, annotation_type)?;
         }
-        if let Some(ref duration_ms) = self.duration_ms {
-            m.serialize_entry(OTEL_FIELD_DURATION_MS, duration_ms)?;
+        if let Some(idle_ns) = self.idle_ns {
+            m.serialize_entry(ATTR_IDLE_NS, &idle_ns)?;
         }
-        if let Some(ref idle_ns) = self.idle_ns {
-            m.serialize_entry(ATTR_IDLE_NS, idle_ns)?;
+        if let Some(busy_ns) = self.busy_ns {
+            m.serialize_entry(ATTR_BUSY_NS, &busy_ns)?;
         }
-        if let Some(ref busy_ns) = self.busy_ns {
-            m.serialize_entry(ATTR_BUSY_NS, busy_ns)?;
-        }
-        m.serialize_entry(EVENT_LEVEL, self.level)?;
-        m.serialize_entry(OTEL_FIELD_NAME, self.name.as_ref())?;
-        m.serialize_entry(EVENT_TARGET, self.target.as_ref())?;
-        for (k, v) in self.fields.fields.iter() {
-            m.serialize_entry(k, v)?;
+        m.serialize_entry(ATTR_TARGET, self.target.as_ref())?;
+        Ok(())
+    }
+
+    fn serialize_resources_field<M: SerializeMap>(
+        &self,
+        m: &mut M,
+    ) -> Result<(), <M as SerializeMap>::Error> {
+        if let Some(ref service_name) = self.service_name {
+            m.serialize_entry(RESOURCES_SERVICE_NAME, service_name)?;
         }
         Ok(())
     }
@@ -386,28 +434,23 @@ impl Serialize for AxiomEvent {
         S: Serializer,
     {
         let mut root = serializer.serialize_map(None)?;
-        root.serialize_entry(
-            "_time",
-            &self
-                .time
-                .format(&time::format_description::well_known::Rfc3339)
-                .map_err(serde::ser::Error::custom)?,
-        )?;
 
-        struct InnerData<'a>(&'a AxiomEvent);
-
-        impl<'a> Serialize for InnerData<'a> {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                let mut m = serializer.serialize_map(None)?;
-                self.0.serialize_data_fields(&mut m)?;
-                m.end()
-            }
+        // first level fields
+        if let Some(span_id) = &self.span_id {
+            root.serialize_entry(OTEL_FIELD_SPAN_ID, span_id)?;
         }
+        if let Some(trace_id) = &self.trace_id {
+            root.serialize_entry(OTEL_FIELD_TRACE_ID, trace_id)?;
+        }
+        if let Some(parent_span_id) = &self.parent_span_id {
+            root.serialize_entry(OTEL_FIELD_PARENT_ID, parent_span_id)?;
+        }
+        if let Some(duration_ms) = &self.duration_ms {
+            root.serialize_entry(OTEL_FIELD_DURATION_MS, duration_ms)?;
+        }
+        root.serialize_entry(OTEL_FIELD_NAME, self.name.as_ref())?;
+        root.serialize_entry(OTEL_FIELD_KIND, self.kind)?;
 
-        root.serialize_entry("data", &InnerData(self))?;
         root.end()
     }
 }
@@ -446,33 +489,53 @@ impl<'a> Serialize for CreateEventPayload<'a> {
         S: Serializer,
     {
         let mut root = serializer.serialize_map(None)?;
-        root.serialize_entry(
-            "_time",
-            &self
-                .event
-                .time
-                .format(&time::format_description::well_known::Rfc3339)
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        struct InnerData<'a>(&'a AxiomEvent, &'a ExtraFields);
 
-        impl<'a> Serialize for InnerData<'a> {
+        // first level fields
+        self.event.serialize_otel_field(&mut root)?;
+
+        // events field
+        struct EventsField<'a>(&'a AxiomEvent);
+        impl<'a> Serialize for EventsField<'a> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
                 let mut m = serializer.serialize_map(None)?;
-                // in most JSON parsers, second key wins and earlier occurrence gets overwritten
-                // we want event fields to take precedence over extra_fields so serialize extra_fields first
-                for (k, v) in self.1.iter() {
-                    m.serialize_entry(k, v)?;
-                }
-                self.0.serialize_data_fields(&mut m)?;
+                self.0.serialize_events_field(&mut m)?;
                 m.end()
             }
         }
 
-        root.serialize_entry("data", &InnerData(self.event, self.extra_fields))?;
+        root.serialize_entry("events", &EventsField(self.event))?;
+
+        // attributes field
+        struct AttrField<'a>(&'a AxiomEvent);
+        impl<'a> Serialize for AttrField<'a> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let mut m = serializer.serialize_map(None)?;
+                self.0.serialize_attr_field(&mut m)?;
+                m.end()
+            }
+        }
+        root.serialize_entry("attributes", &AttrField(self.event))?;
+
+        // resources field
+        struct ResourcesField<'a>(&'a AxiomEvent);
+        impl<'a> Serialize for ResourcesField<'a> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let mut m = serializer.serialize_map(None)?;
+                self.0.serialize_resources_field(&mut m)?;
+                m.end()
+            }
+        }
+        root.serialize_entry("resources", &ResourcesField(self.event))?;
+
         root.end()
     }
 }

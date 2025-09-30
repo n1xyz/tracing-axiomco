@@ -255,8 +255,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::{
-        EVENT_LEVEL, EVENT_TIMESTAMP, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SERVICE_NAME,
-        OTEL_FIELD_SPAN_ID,
+        EVENT_LEVEL, EVENT_TIMESTAMP, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID,
+        RESOURCES_SERVICE_NAME,
     };
 
     use super::*;
@@ -401,7 +401,7 @@ pub(crate) mod tests {
         assert_eq!(ev_map.get(OTEL_FIELD_SPAN_ID), None);
         assert_eq!(ev_map.get(OTEL_FIELD_PARENT_ID), Some(&json!(child_id)));
         assert_eq!(
-            ev_map.get(OTEL_FIELD_SERVICE_NAME),
+            ev_map.get(RESOURCES_SERVICE_NAME),
             Some(&json!("service_name"))
         );
         assert_eq!(ev_map.get(EVENT_LEVEL), Some(&json!("info")));
