@@ -182,7 +182,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             target: Cow::Borrowed(meta.target()),
             name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
             event_field: fields,
-            kind: kind_as_axiom_str(&SpanKind::INTERNAL),
+            kind: kind_as_axiom_str(&SpanKind::CLIENT),
         }));
     }
 
@@ -249,7 +249,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             target: Cow::Borrowed(meta.target()),
             name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
             event_field: fields,
-            kind: kind_as_axiom_str(&SpanKind::INTERNAL),
+            kind: kind_as_axiom_str(&SpanKind::CLIENT),
         }));
     }
 }
@@ -396,7 +396,7 @@ pub(crate) mod tests {
 
         assert_eq!(root.get(OTEL_FIELD_SPAN_ID), None);
         assert_eq!(root.get(OTEL_FIELD_PARENT_ID), Some(&json!(child_id)));
-        assert_eq!(root.get(OTEL_FIELD_KIND), Some(&json!("internal")));
+        assert_eq!(root.get(OTEL_FIELD_KIND), Some(&json!("client")));
         assert_eq!(
             root.get(OTEL_FIELD_NAME),
             Some(&json!(format!(
@@ -404,7 +404,7 @@ pub(crate) mod tests {
                 env!("CARGO_CRATE_NAME")
             )))
         );
-        assert_eq!(root.get(OTEL_FIELD_KIND).unwrap(), "internal");
+        assert_eq!(root.get(OTEL_FIELD_KIND).unwrap(), "client");
 
         let ev_map = match root.get("attributes").unwrap() {
             Value::Object(data) => data,
