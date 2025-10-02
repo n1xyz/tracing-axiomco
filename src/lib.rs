@@ -29,8 +29,7 @@ pub const OTEL_FIELD_DURATION_MS: &str = "duration";
 pub const EVENT_LEVEL: &str = "level";
 pub const EVENT_TIMESTAMP: &str = "_time";
 pub const EVENT_NAME: &str = "name";
-pub const EVENT_FIELD: &str = "attributes";
-pub const ATTR_ANNOTATION_TYPE: &str = "meta.annotation_type";
+pub const ATTR_ANNOTATION_TYPE: &str = "annotation_type";
 pub const ATTR_IDLE_NS: &str = "idle_ns";
 pub const ATTR_BUSY_NS: &str = "busy_ns";
 pub const ATTR_TARGET: &str = "target";
@@ -450,6 +449,50 @@ impl Serialize for AxiomEvent {
         }
         root.serialize_entry(OTEL_FIELD_NAME, self.name.as_ref())?;
         root.serialize_entry(OTEL_FIELD_KIND, self.kind)?;
+
+        // events field
+        struct EventsField<'a>(&'a AxiomEvent);
+        impl<'a> Serialize for EventsField<'a> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let mut m = serializer.serialize_map(None)?;
+                self.0.serialize_events_field(&mut m)?;
+                m.end()
+            }
+        }
+
+        root.serialize_entry("events", &EventsField(self))?;
+
+        // attributes field
+        struct AttrField<'a>(&'a AxiomEvent);
+        impl<'a> Serialize for AttrField<'a> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let mut m = serializer.serialize_map(None)?;
+                self.0.serialize_attr_field(&mut m)?;
+
+                m.end()
+            }
+        }
+        root.serialize_entry("attributes", &AttrField(self))?;
+
+        // resources field
+        struct ResourcesField<'a>(&'a AxiomEvent);
+        impl<'a> Serialize for ResourcesField<'a> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let mut m = serializer.serialize_map(None)?;
+                self.0.serialize_resources_field(&mut m)?;
+                m.end()
+            }
+        }
+        root.serialize_entry("resources", &ResourcesField(self))?;
 
         root.end()
     }

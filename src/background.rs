@@ -177,11 +177,18 @@ where
         // can't mutably borrow this and another field at the same time, so move out
         let mut recvd = std::mem::take(&mut self.recv_buf);
         match Pin::new(&mut self.receiver).poll_recv_many(cx, &mut recvd, 1024) {
-            Poll::Pending => return (Poll::Pending, None),
+            Poll::Pending => {
+                // if self.recv_buf.is_empty() {
+                self.recv_buf = recvd;
+                return (Poll::Pending, None);
+            }
             Poll::Ready(0) => {
                 // channel closed (since recv limit is nonzero)
                 self.quitting = true;
-                return (Poll::Ready(()), None);
+                if recvd.is_empty() {
+                    self.recv_buf = recvd;
+                    return (Poll::Ready(()), None);
+                }
             }
             Poll::Ready(1..) => {}
         }
@@ -242,6 +249,7 @@ where
         };
         match res {
             Ok(()) => {
+                self.backoff_count = 0; // reset backoff count when success 
                 let new_state = self.transition_idle();
                 cx.waker().wake_by_ref();
                 (Poll::Pending, Some(new_state))

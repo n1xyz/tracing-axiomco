@@ -257,8 +257,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::{
-        EVENT_LEVEL, EVENT_TIMESTAMP, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID,
-        RESOURCES_SERVICE_NAME,
+        ATTR_TARGET, EVENT_LEVEL, EVENT_TIMESTAMP, OTEL_FIELD_KIND, OTEL_FIELD_NAME,
+        OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID, RESOURCES_SERVICE_NAME,
     };
 
     use super::*;
@@ -341,7 +341,6 @@ pub(crate) mod tests {
                 )
             });
         let after = OffsetDateTime::now_utc();
-
         let num_events = receiver.len();
         assert_eq!(
             num_events,
@@ -394,33 +393,56 @@ pub(crate) mod tests {
                 val
             ),
         };
-        let ev_map = match root.get("data").unwrap() {
-            // TODO change key
+
+        assert_eq!(root.get(OTEL_FIELD_SPAN_ID), None);
+        assert_eq!(root.get(OTEL_FIELD_PARENT_ID), Some(&json!(child_id)));
+        assert_eq!(root.get(OTEL_FIELD_KIND), Some(&json!("internal")));
+        assert_eq!(
+            root.get(OTEL_FIELD_NAME),
+            Some(&json!(format!(
+                "{}::layer::tests",
+                env!("CARGO_CRATE_NAME")
+            )))
+        );
+        assert_eq!(root.get(OTEL_FIELD_KIND).unwrap(), "internal");
+
+        let ev_map = match root.get("attributes").unwrap() {
+            Value::Object(data) => data,
+            _ => panic!("data key has unexpected type"),
+        };
+        check_ev_map_depth_one(ev_map);
+        assert_eq!(
+            ev_map.get(ATTR_TARGET),
+            Some(&json!(format!(
+                "{}::layer::tests",
+                env!("CARGO_CRATE_NAME")
+            )))
+        );
+
+        let ev_map = match root.get("resources").unwrap() {
+            Value::Object(data) => data,
+            _ => panic!("data key has unexpected type"),
+        };
+        check_ev_map_depth_one(ev_map);
+        assert_eq!(
+            ev_map.get(RESOURCES_SERVICE_NAME),
+            Some(&json!("service_name"))
+        );
+
+        let ev_map = match root.get("events").unwrap() {
             Value::Object(data) => data,
             _ => panic!("data key has unexpected type"),
         };
         check_ev_map_depth_one(ev_map);
 
-        assert_eq!(ev_map.get(OTEL_FIELD_SPAN_ID), None);
-        assert_eq!(ev_map.get(OTEL_FIELD_PARENT_ID), Some(&json!(child_id)));
-        assert_eq!(
-            ev_map.get(RESOURCES_SERVICE_NAME),
-            Some(&json!("service_name"))
-        );
         assert_eq!(ev_map.get(EVENT_LEVEL), Some(&json!("info")));
         assert!(
             before <= log_event.time && log_event.time <= after,
             "invalid timestamp: {:#?}",
             ev_map.get(EVENT_TIMESTAMP)
         );
-        // "name" field is based on line number so cannot be easily checked
-        assert_eq!(
-            ev_map.get("target"),
-            Some(&json!(format!(
-                "{}::layer::tests",
-                env!("CARGO_CRATE_NAME")
-            )))
-        );
+
+        //"event_name" field is based on line number so cannot be easily checked
 
         assert_eq!(ev_map.get("event_field"), Some(&json!(e_val)));
         assert_eq!(ev_map.get("child_field"), Some(&json!(c_val)));
@@ -442,17 +464,27 @@ pub(crate) mod tests {
                 val
             ),
         };
-        let ev_map = match root.get("data").unwrap() {
+
+        let ev_map = match root.get("attributes").unwrap() {
             Value::Object(data) => data,
             _ => panic!("data key has unexpected type"),
         };
         check_ev_map_depth_one(ev_map);
 
-        assert_eq!(ev_map.get(OTEL_FIELD_SPAN_ID), Some(&json!(parent_id)));
-        assert_eq!(
-            ev_map.get(OTEL_FIELD_PARENT_ID),
-            Some(&json!(grandparent_id))
-        );
+        let ev_map = match root.get("resources").unwrap() {
+            Value::Object(data) => data,
+            _ => panic!("data key has unexpected type"),
+        };
+        check_ev_map_depth_one(ev_map);
+
+        let ev_map = match root.get("events").unwrap() {
+            Value::Object(data) => data,
+            _ => panic!("data key has unexpected type"),
+        };
+        check_ev_map_depth_one(ev_map);
+
+        assert_eq!(root.get(OTEL_FIELD_SPAN_ID), Some(&json!(parent_id)));
+        assert_eq!(root.get(OTEL_FIELD_PARENT_ID), Some(&json!(grandparent_id)));
         assert_eq!(ev_map.get("event_field"), None);
         assert_eq!(ev_map.get("child_field"), None);
         assert_eq!(ev_map.get("parent_field"), Some(&json!(p_val)));
