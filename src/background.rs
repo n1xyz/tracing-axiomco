@@ -33,8 +33,6 @@ impl std::error::Error for BadRedirect {}
 fn report(mut err: &(dyn std::error::Error + 'static)) -> String {
     use std::fmt::Write as _;
     let mut s = format!("{}", err);
-    // TODO debug stuff
-    eprintln!("Error sending to Axiom: {}", s);
     while let Some(src) = err.source() {
         let _ = write!(s, ": {}", src);
         err = src;
@@ -104,13 +102,10 @@ impl Backend for ClientBackend {
                     .await
                     .map_err(|e| report(&e))?;
                 let status = resp.status();
-                eprintln!("Axiom response status: {}", status); // TODO debug stuff
                 if !status.is_success() {
                     let body = resp.text().await.map_err(|e| -> Self::Err {
                         format!("HTTP error {}, decoding body failed: {}", status, e).into()
                     })?;
-                    // TODO another check
-                    tracing::error!("HTTP error {}: {:#?}", status, body);
                     return Err(format!("HTTP error {}: {:#?}", status, body).into());
                 }
                 Ok(())
@@ -178,7 +173,6 @@ where
         let mut recvd = std::mem::take(&mut self.recv_buf);
         match Pin::new(&mut self.receiver).poll_recv_many(cx, &mut recvd, 1024) {
             Poll::Pending => {
-                // if self.recv_buf.is_empty() {
                 self.recv_buf = recvd;
                 return (Poll::Pending, None);
             }
@@ -657,8 +651,13 @@ mod tests {
 
     #[derive(Clone, Debug, Deserialize)]
     struct WrappedEvent {
+        #[serde(default, alias = "_time")]
         time: String,
-        data: ApiEvent,
+        events: ApiEvent,
+        attributes: Option<ApiEvent>,
+        resources: Option<ApiEvent>,
+        #[serde(flatten)]
+        top_level: ApiEvent,
     }
     type DatasetPayload = Vec<WrappedEvent>;
 
@@ -703,8 +702,8 @@ mod tests {
             Some("zstd")
         );
 
-        let (parts, body) = request.into_parts();
-        let bytes = axum::body::to_bytes(body, 8192).await.unwrap();
+        let (mut parts, body) = request.into_parts();
+        let bytes = axum::body::to_bytes(body, 10 * 1024 * 1024).await.unwrap();
 
         let new_body = match zstd::decode_all(Cursor::new(bytes.to_vec())) {
             Err(e) => {
@@ -717,6 +716,7 @@ mod tests {
             }
             Ok(b) => b,
         };
+        parts.headers.remove(reqwest::header::CONTENT_ENCODING);
         let req = Request::from_parts(parts, new_body.into());
 
         next.run(req).await
@@ -750,22 +750,49 @@ mod tests {
 
         payload.iter().for_each(|evt| {
             tracing::debug!(ts = ?evt.time, "got span with timestamp");
-            evt.data.iter().for_each(|(k, v)| {
-                assert!(
-                    !matches!(
-                        v,
-                        serde_json::Value::Array(_) | serde_json::Value::Object(_)
-                    ),
-                    "event must be depth 1: {} = {}",
-                    k,
-                    v
-                )
-            })
+            let nested_fields: [(&str, Option<&ApiEvent>); 4] = [
+                ("events", Some(&evt.events)),
+                ("attributes", evt.attributes.as_ref()),
+                ("resources", evt.resources.as_ref()),
+                ("top_level", Some(&evt.top_level)),
+            ];
+
+            for (name, fields) in nested_fields {
+                if let Some(field) = fields {
+                    for (k, v) in field {
+                        assert!(
+                            !matches!(
+                                v,
+                                serde_json::Value::Array(_) | serde_json::Value::Object(_)
+                            ),
+                            "{} must be depth 1: {} = {}",
+                            name,
+                            k,
+                            v
+                        );
+                    }
+                }
+            }
         });
 
         match state.datasets.write().unwrap().entry(dataset.to_string()) {
-            Entry::Vacant(e) => drop(e.insert(payload.into_iter().map(|e| e.data).collect())),
-            Entry::Occupied(mut e) => e.get_mut().extend(payload.into_iter().map(|e| e.data)),
+            Entry::Vacant(e) => {
+                e.insert(
+                    payload
+                        .into_iter()
+                        .map(|ev| {
+                            let mut merged = ev.top_level;
+                            merged.extend(ev.resources.unwrap());
+                            merged.extend(ev.attributes.unwrap());
+                            merged.extend(ev.events);
+                            merged
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            Entry::Occupied(mut e) => {
+                e.get_mut().extend(payload.into_iter().map(|e| e.events));
+            }
         };
 
         Json(json!({"status": 200})).into_response()
@@ -819,7 +846,7 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::span!(target: "span-test-target", tracing::Level::WARN, "span name", span.field = 40);
             let _enter = span.enter();
-            tracing::event!(name: "test-name", target: "test-target", tracing::Level::INFO, event.field = 41, "event message");
+            tracing::event!(name: "test-name", target: "test-target", tracing::Level::INFO, event.field = 41, "end-to-end submit event message");
         });
         // flush all of the events
         bg_task_controller.shutdown().await;
@@ -902,7 +929,7 @@ mod tests {
             .with(honey_layer)
             .with(tracing_subscriber::fmt::layer());
         tracing::subscriber::with_default(subscriber, || {
-            tracing::event!(Level::INFO, "event message");
+            tracing::event!(Level::INFO, "end-to-end retry event message");
         });
 
         // since (for now) we don't continue retrying after shutdown signal, give some

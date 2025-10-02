@@ -49,7 +49,7 @@ fn single_event() {
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    // note: work neeeded if criterion.rs ever starts using tracing internally
+    // note: work needed if criterion.rs ever starts using tracing internally
     c.bench_function("single_event", |b| {
         b.iter_custom(|iters| {
             let extra_fields: Vec<(Cow<'static, str>, Value)> = vec![
