@@ -257,8 +257,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::{
-        ATTR_TARGET, EVENT_LEVEL, EVENT_TIMESTAMP, OTEL_FIELD_KIND, OTEL_FIELD_NAME,
-        OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID, RESOURCES_SERVICE_NAME,
+        ATTR_TARGET, EVENT_LEVEL, OTEL_FIELD_KIND, OTEL_FIELD_NAME, OTEL_FIELD_PARENT_ID,
+        OTEL_FIELD_SPAN_ID, OTEL_FIELD_TIMESTAMP, RESOURCES_SERVICE_NAME,
     };
 
     use super::*;
@@ -439,7 +439,7 @@ pub(crate) mod tests {
         assert!(
             before <= log_event.time && log_event.time <= after,
             "invalid timestamp: {:#?}",
-            ev_map.get(EVENT_TIMESTAMP)
+            ev_map.get(OTEL_FIELD_TIMESTAMP)
         );
 
         //"event_name" field is based on line number so cannot be easily checked

@@ -27,7 +27,7 @@ pub const OTEL_FIELD_NAME: &str = "name";
 pub const OTEL_FIELD_KIND: &str = "kind";
 pub const OTEL_FIELD_DURATION_MS: &str = "duration";
 pub const EVENT_LEVEL: &str = "level";
-pub const EVENT_TIMESTAMP: &str = "_time";
+pub const OTEL_FIELD_TIMESTAMP: &str = "_time";
 pub const EVENT_NAME: &str = "event_name";
 pub const ATTR_ANNOTATION_TYPE: &str = "annotation_type";
 pub const ATTR_IDLE_NS: &str = "idle_ns";
@@ -338,13 +338,13 @@ pub struct AxiomEvent {
     pub kind: &'static str,
     pub name: Cow<'static, str>,
     pub duration_ms: Option<u64>,
+    pub time: OffsetDateTime,
     // attributes field
     pub annotation_type: Option<Cow<'static, str>>,
     pub idle_ns: Option<u64>,
     pub busy_ns: Option<u64>,
     pub target: Cow<'static, str>,
     // events field
-    pub time: OffsetDateTime,
     pub event_name: Cow<'static, str>,
     pub level: &'static str,
     pub event_field: Fields,
@@ -372,6 +372,13 @@ impl AxiomEvent {
         }
         m.serialize_entry(OTEL_FIELD_NAME, self.name.as_ref())?;
         m.serialize_entry(OTEL_FIELD_KIND, self.kind)?;
+        m.serialize_entry(
+            OTEL_FIELD_TIMESTAMP,
+            &self
+                .time
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(serde::ser::Error::custom)?,
+        )?;
 
         Ok(())
     }
@@ -380,14 +387,6 @@ impl AxiomEvent {
         &self,
         m: &mut M,
     ) -> Result<(), <M as SerializeMap>::Error> {
-        m.serialize_entry(
-            EVENT_TIMESTAMP,
-            &self
-                .time
-                .format(&time::format_description::well_known::Rfc3339)
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-
         m.serialize_entry(EVENT_NAME, self.event_name.as_ref())?;
 
         m.serialize_entry(EVENT_LEVEL, self.level)?;
@@ -449,6 +448,13 @@ impl Serialize for AxiomEvent {
         }
         root.serialize_entry(OTEL_FIELD_NAME, self.name.as_ref())?;
         root.serialize_entry(OTEL_FIELD_KIND, self.kind)?;
+        root.serialize_entry(
+            OTEL_FIELD_TIMESTAMP,
+            &self
+                .time
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(serde::ser::Error::custom)?,
+        )?;
 
         // events field
         struct EventsField<'a>(&'a AxiomEvent);
