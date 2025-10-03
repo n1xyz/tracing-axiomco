@@ -69,7 +69,7 @@ Fields whose value is an error type (`&(dyn std::error::Error + 'static)`) will 
 - `{name}.debug`: `Debug` format of the root error
 - `{name}.chain`: a string with the `Display` implementation of each error in the `source` chain of the root error, enumerated
 
-All span/event messages follows Axiom's [trace schema](https://axiom.co/docs/query-data/traces#trace-schema-overview), with extra fields flattened and inserted under the `events` field.
+All span/event messages follows Axiom's [trace schema](https://axiom.co/docs/query-data/traces#trace-schema-overview), with extra fields flattened and inserted under the `events` section.
 
 ## Performance
 
