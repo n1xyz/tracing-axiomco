@@ -159,8 +159,17 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> (Poll<()>, Option<State<<B as Backend>::Fut>>) {
-        // invariant
-        assert!(self.inflight_reqs.is_empty());
+        // invariant: no `assert!` in production
+        debug_assert!(
+            self.inflight_reqs.is_empty(),
+            "poll_idle called with {} inflight reqs",
+            self.inflight_reqs.len()
+        );
+        if !self.inflight_reqs.is_empty() {
+            let new_state = self.transition_inflight();
+            cx.waker().wake_by_ref();
+            return (Poll::Pending, Some(new_state));
+        }
 
         let _default_guard = tracing::subscriber::set_default(NoSubscriber::default());
 
@@ -523,16 +532,16 @@ mod tests {
             RecorderBackend::new(),
             receiver,
         );
-        assert!(matches!(task.1, State::Idle));
+        debug_assert!(matches!(task.1, State::Idle));
 
         let evt = new_event(Some(1234));
         sender.blocking_send(Some(evt.clone())).unwrap();
         sender.blocking_send(Some(evt.clone())).unwrap();
 
         // Idle => Inflight
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Inflight(_)));
-        assert_eq!(task.0.inflight_reqs.len(), 2);
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Inflight(_)));
+        debug_assert_eq!(task.0.inflight_reqs.len(), 2);
 
         // add to queue while task is not processing new events
         sender
@@ -544,28 +553,28 @@ mod tests {
             .unwrap();
 
         // send_task completes with Ok => idle
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Idle));
-        assert_eq!(task.0.backend.events.len(), 2);
-        assert_eq!(task.0.backend.events[0], evt);
-        assert_eq!(task.0.backend.events[1], evt);
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(task.0.backend.events.len(), 2);
+        debug_assert_eq!(task.0.backend.events[0], evt);
+        debug_assert_eq!(task.0.backend.events[1], evt);
 
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Inflight(_)));
-        assert_eq!(task.0.backend.events.len(), 3);
-        assert_eq!(
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Inflight(_)));
+        debug_assert_eq!(task.0.backend.events.len(), 3);
+        debug_assert_eq!(
             task.0.backend.events[2].span_id,
             Some(SpanId::from(NonZeroU64::new(1).unwrap()))
         );
 
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Idle));
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Idle));
 
         sender.blocking_send(None).unwrap();
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
-        assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
+        debug_assert!(matches!(task.1, State::Idle));
     }
 
     #[test]
@@ -579,10 +588,10 @@ mod tests {
             RecorderBackend::new(),
             receiver,
         );
-        assert!(matches!(task.1, State::Idle));
+        debug_assert!(matches!(task.1, State::Idle));
 
         drop(sender);
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
     }
 
     // need a runtime to even be able to construct tokio::time::sleep() futures, and
@@ -598,13 +607,13 @@ mod tests {
             RecorderBackend::new_induce_failure(),
             receiver,
         );
-        assert!(matches!(task.1, State::Idle));
+        debug_assert!(matches!(task.1, State::Idle));
 
         let evt = new_event(Some(1234));
         sender.send(Some(evt.clone())).await.unwrap();
         sender.send(Some(evt.clone())).await.unwrap();
 
-        assert_eq!(
+        debug_assert_eq!(
             task.0.backend.events.len(),
             0,
             "no events processed until poll"
@@ -617,26 +626,26 @@ mod tests {
             State::BackingOff(BackingOffState { task }) => task.await,
             _ => panic!("expected task to be in BackingOff state"),
         }
-        assert_eq!(
+        debug_assert_eq!(
             task.0.backend.events.len(),
             0,
             "events fail to submit due to induce_failure"
         );
 
         task.0.backend.induce_failure = false;
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Inflight(_)));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Inflight(_)));
 
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Idle));
-        assert_eq!(
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(
             task.0.backend.events.len(),
             2,
             "events submit successfully after induce_failure disabled"
         );
 
         drop(sender);
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
     }
 
     const MOCK_API_KEY: &str = "Bearer xxx-testing-api-key-xxx";
@@ -694,7 +703,7 @@ mod tests {
     }
 
     async fn middleware_zstd_decompress(request: Request, next: Next) -> Response {
-        assert_eq!(
+        debug_assert_eq!(
             request
                 .headers()
                 .get(reqwest::header::CONTENT_ENCODING)
@@ -728,7 +737,7 @@ mod tests {
         Path(dataset): Path<String>,
         Json(payload): Json<DatasetPayload>,
     ) -> Response {
-        assert_eq!(
+        debug_assert_eq!(
             headers
                 .get(TESTING_HEADER_NAME)
                 .and_then(|v| v.to_str().ok()),
@@ -760,7 +769,7 @@ mod tests {
             for (name, fields) in nested_fields {
                 if let Some(field) = fields {
                     for (k, v) in field {
-                        assert!(
+                        debug_assert!(
                             !matches!(
                                 v,
                                 serde_json::Value::Array(_) | serde_json::Value::Object(_)
@@ -855,35 +864,35 @@ mod tests {
         // get an exclusive copy so that we don't have to go through the lock all the time
         let datasets = state.datasets.read().unwrap().clone();
 
-        assert_eq!(datasets.len(), 1, "expected single dataset");
+        debug_assert_eq!(datasets.len(), 1, "expected single dataset");
         let test_dataset = datasets
             .get(TESTING_DATASET)
             .expect("single dataset to be testing dataset");
-        assert_eq!(
+        debug_assert_eq!(
             test_dataset.len(),
             2,
             "expected exactly one event and one span close"
         );
         let log_event = &test_dataset[0];
-        assert_eq!(log_event.get("event.field"), Some(&json!(41)));
-        assert_eq!(log_event.get("span.field"), Some(&json!(40)));
-        assert_eq!(log_event.get(EVENT_LEVEL), Some(&json!("info")));
-        assert_eq!(log_event.get("target"), Some(&json!("test-target")));
-        assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
+        debug_assert_eq!(log_event.get("event.field"), Some(&json!(41)));
+        debug_assert_eq!(log_event.get("span.field"), Some(&json!(40)));
+        debug_assert_eq!(log_event.get(EVENT_LEVEL), Some(&json!("info")));
+        debug_assert_eq!(log_event.get("target"), Some(&json!("test-target")));
+        debug_assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
         let trace_id = log_event.get(OTEL_FIELD_TRACE_ID).unwrap();
 
         let span_event = &test_dataset[1];
-        assert_eq!(span_event.get("event.field"), None);
-        assert_eq!(span_event.get("span.field"), Some(&json!(40)));
-        assert_eq!(span_event.get(EVENT_LEVEL), Some(&json!("warn")));
-        assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
-        assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
-        assert!(span_event.get(OTEL_FIELD_SPAN_ID).is_some());
-        assert_eq!(
+        debug_assert_eq!(span_event.get("event.field"), None);
+        debug_assert_eq!(span_event.get("span.field"), Some(&json!(40)));
+        debug_assert_eq!(span_event.get(EVENT_LEVEL), Some(&json!("warn")));
+        debug_assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
+        debug_assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
+        debug_assert!(span_event.get(OTEL_FIELD_SPAN_ID).is_some());
+        debug_assert_eq!(
             log_event.get(OTEL_FIELD_PARENT_ID),
             Some(span_event.get(OTEL_FIELD_SPAN_ID).unwrap())
         );
-        assert_eq!(span_event.get(OTEL_FIELD_TRACE_ID), Some(trace_id));
+        debug_assert_eq!(span_event.get(OTEL_FIELD_TRACE_ID), Some(trace_id));
     }
 
     #[tokio::test]
@@ -946,15 +955,15 @@ mod tests {
         honey_bg_join_handle.await.unwrap();
         handle.assert_finished();
 
-        assert_eq!(
+        debug_assert_eq!(
             *state.req_count.lock().unwrap(),
             2,
             "expected induce error test to take exactly 2 request to suceed",
         );
         // get an exclusive copy so that we don't have to go through the lock all the time
         let datasets = state.datasets.read().unwrap().clone();
-        assert_eq!(datasets.len(), 1, "expected dataset to be recorded");
-        assert_eq!(
+        debug_assert_eq!(datasets.len(), 1, "expected dataset to be recorded");
+        debug_assert_eq!(
             datasets.values().next().unwrap().len(),
             1,
             "expected single event in dataset"
