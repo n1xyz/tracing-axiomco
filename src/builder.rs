@@ -1,15 +1,15 @@
 use crate::{
-    ExtraFields, Url, Value,
-    background::{BackgroundTask, BackgroundTaskController},
+    ExtraFields,
+    Url,
+    Value,
+    background::{BackgroundTask, BackgroundTaskController}, // TODO link layer to builder docs
 };
 use reqwest::header::{self, HeaderMap, HeaderName};
 use std::borrow::Cow;
 use tokio::sync::mpsc;
 
-pub const HONEYCOMB_SERVER_US: &str = "https://api.honeycomb.io/";
-pub const HONEYCOMB_SERVER_EU: &str = "https://api.eu1.honeycomb.io/";
-
-pub const HONEYCOMB_AUTH_HEADER_NAME: &str = "x-honeycomb-team";
+pub const AXIOM_SERVER_US: &str = "https://api.axiom.co/";
+pub const AXIOM_SERVER_EU: &str = "https://api.eu.axiom.co/";
 
 pub const DEFAULT_CHANNEL_SIZE: usize = 1024;
 
@@ -43,15 +43,15 @@ impl std::error::Error for AddHeaderError {}
 #[derive(Debug)]
 pub struct InvalidEndpointConfig {
     api_host: String,
-    dataset_slug: String,
+    dataset_name: String,
 }
 
 impl std::fmt::Display for InvalidEndpointConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "cannot build Honeycomb endpoint from API host {:?} and dataset {:?}",
-            self.api_host, self.dataset_slug
+            "cannot build Axiom endpoint from API host {:?} and dataset {:?}",
+            self.api_host, self.dataset_name
         )
     }
 }
@@ -81,7 +81,7 @@ impl Builder {
         self
     }
 
-    /// Set an extra HTTP header to be sent with all requests sent to Honeycomb.
+    /// Set an extra HTTP header to be sent with all requests sent to Axiom.
     pub fn http_header<S: AsRef<str>, T: AsRef<str>>(
         mut self,
         name: S,
@@ -106,14 +106,10 @@ impl Builder {
     }
 
     /// Build using the US instance.
-    /// `dataset_slug` is the case-insensitive Honeycomb dataset to send events to.
-    /// Names may contain URL-encoded spaces or other special characters, but not
-    /// URL-encoded slashes. For example, "My%20Dataset" will show up in the UI as "My
-    /// Dataset".
     pub fn build(
         self,
         api_host: &str,
-        dataset_slug: &str,
+        dataset_name: &str,
     ) -> Result<
         (
             crate::layer::Layer,
@@ -122,14 +118,14 @@ impl Builder {
         ),
         InvalidEndpointConfig,
     > {
-        // endpoint is {api_host}/1/batch/{datasetSlug}
-        // ref: https://api-docs.honeycomb.io/api/events/createevents
+        // endpoint is {api_host}/v1/datasets/{dataset_name}/ingest
+        // ref: https://axiom.co/docs/restapi/ingest
         let endpoint = Url::parse(api_host)
-            .and_then(|host| host.join("1/batch/"))
-            .and_then(|endpoint| endpoint.join(dataset_slug))
+            .and_then(|host| host.join("v1/datasets/"))
+            .and_then(|endpoint| endpoint.join(&format!("{}/ingest", dataset_name)))
             .map_err(|_| InvalidEndpointConfig {
                 api_host: api_host.to_string(),
-                dataset_slug: dataset_slug.to_string(),
+                dataset_name: dataset_name.to_string(),
             })?;
         Ok(self.build_with_custom_endpoint(endpoint))
     }
@@ -137,7 +133,7 @@ impl Builder {
     /// Build using a custom "Create Events" endpoint [`Url`].
     pub fn build_with_custom_endpoint(
         self,
-        honeycomb_endpoint_url: Url,
+        axiom_endpoint_url: Url,
     ) -> (
         crate::layer::Layer,
         BackgroundTask,
@@ -146,7 +142,7 @@ impl Builder {
         let (sender, receiver) = mpsc::channel(self.event_channel_size);
         let layer = crate::layer::Layer::new(self.service_name, sender.clone());
         let background_task = BackgroundTask::new(
-            honeycomb_endpoint_url,
+            axiom_endpoint_url,
             self.http_headers,
             self.extra_fields,
             receiver,
@@ -156,15 +152,15 @@ impl Builder {
     }
 }
 
-/// Create a [`Builder`] with the given `api_key`. Find your team's API key at
-/// https://ui.honeycomb.io/account.
+/// Create a [`Builder`] with the given `api_key`.
 ///
-/// It is recommended that an Ingest API key is used for sending events.
+/// It is recommended that an Ingest API key is used for sending events. It is also what is used here.
 /// A Configuration API key will work, and must have the Send Events permission.
 /// Learn more about API keys:
-/// https://docs.honeycomb.io/get-started/configure/environments/manage-api-keys/
+/// https://axiom.co/docs/restapi/ingest
 ///
 /// Panics if `api_key` is not a valid HTTP header value.
+///
 pub fn builder(api_key: &str) -> Builder {
     let mut builder = Builder {
         service_name: None,
@@ -175,9 +171,8 @@ pub fn builder(api_key: &str) -> Builder {
     let mut auth_value =
         header::HeaderValue::from_str(api_key).expect("api_key to be a valid HTTP header value");
     auth_value.set_sensitive(true);
-    builder.http_headers.insert(
-        header::HeaderName::from_static(HONEYCOMB_AUTH_HEADER_NAME),
-        auth_value,
-    );
+    builder
+        .http_headers
+        .insert(header::AUTHORIZATION, auth_value);
     builder
 }

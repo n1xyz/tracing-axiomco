@@ -8,7 +8,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tracing::{Level, instrument::WithSubscriber, subscriber::NoSubscriber};
-use tracing_honeycombio::{
+use tracing_axiomco::{
     CreateEventsPayload, Value,
     background::{Backend, BackgroundTaskFut},
     builder::DEFAULT_CHANNEL_SIZE,
@@ -116,7 +116,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             ];
 
             let (sender, receiver) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
-            let layer = tracing_honeycombio::layer::Layer::new(
+            let layer = tracing_axiomco::layer::Layer::new(
                 black_box(Some("my-cool-service-name".into())),
                 black_box(sender.clone()),
             );
@@ -159,5 +159,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().sample_size(300);
+    targets = criterion_benchmark
+}
 criterion_main!(benches);

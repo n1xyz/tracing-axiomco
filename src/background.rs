@@ -8,7 +8,7 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::{instrument::WithSubscriber, subscriber::NoSubscriber};
 
-use crate::HoneycombEvent;
+use crate::AxiomEvent;
 
 #[derive(Debug)]
 pub struct BadRedirect {
@@ -48,15 +48,15 @@ pub trait Backend {
 }
 
 pub struct ClientBackend {
-    pub honeycomb_endpoint_url: Url,
+    pub axiom_endpoint_url: Url,
     pub compression_context: zstd::zstd_safe::CCtx<'static>,
     pub http_client: reqwest::Client,
 }
 
 impl ClientBackend {
-    pub fn new(honeycomb_endpoint_url: Url, http_headers: reqwest::header::HeaderMap) -> Self {
+    pub fn new(axiom_endpoint_url: Url, http_headers: reqwest::header::HeaderMap) -> Self {
         Self {
-            honeycomb_endpoint_url,
+            axiom_endpoint_url,
             compression_context: zstd::zstd_safe::CCtx::try_create().expect("zstd context allocation to succeed"),
             http_client: reqwest::Client::builder()
                 .user_agent(concat!(
@@ -91,7 +91,7 @@ impl Backend for ClientBackend {
                     .expect("none of the tracing field types can fail to serialize and zstd compression should succeed");
         encoder.finish().expect("zstd compression should succeed");
 
-        let request_builder = self.http_client.post(self.honeycomb_endpoint_url.clone());
+        let request_builder = self.http_client.post(self.axiom_endpoint_url.clone());
         Box::pin(
             async move {
                 let resp = request_builder
@@ -116,14 +116,14 @@ impl Backend for ClientBackend {
 }
 
 struct BackgroundTaskInner<B> {
-    receiver: mpsc::Receiver<Option<HoneycombEvent>>,
+    receiver: mpsc::Receiver<Option<AxiomEvent>>,
     extra_fields: ExtraFields,
     backend: B,
     backoff_count: u32,
     quitting: bool,
     // we can't recv into inflight_reqs because the buffer must hold `Option`s
-    recv_buf: Vec<Option<HoneycombEvent>>,
-    inflight_reqs: Vec<HoneycombEvent>,
+    recv_buf: Vec<Option<AxiomEvent>>,
+    inflight_reqs: Vec<AxiomEvent>,
 }
 
 struct InflightState<F> {
@@ -159,8 +159,17 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> (Poll<()>, Option<State<<B as Backend>::Fut>>) {
-        // invariant
-        assert!(self.inflight_reqs.is_empty());
+        // invariant: no `assert!` in production
+        debug_assert!(
+            self.inflight_reqs.is_empty(),
+            "poll_idle called with {} inflight reqs",
+            self.inflight_reqs.len()
+        );
+        if !self.inflight_reqs.is_empty() {
+            let new_state = self.transition_inflight();
+            cx.waker().wake_by_ref();
+            return (Poll::Pending, Some(new_state));
+        }
 
         let _default_guard = tracing::subscriber::set_default(NoSubscriber::default());
 
@@ -172,11 +181,17 @@ where
         // can't mutably borrow this and another field at the same time, so move out
         let mut recvd = std::mem::take(&mut self.recv_buf);
         match Pin::new(&mut self.receiver).poll_recv_many(cx, &mut recvd, 1024) {
-            Poll::Pending => return (Poll::Pending, None),
+            Poll::Pending => {
+                self.recv_buf = recvd;
+                return (Poll::Pending, None);
+            }
             Poll::Ready(0) => {
                 // channel closed (since recv limit is nonzero)
                 self.quitting = true;
-                return (Poll::Ready(()), None);
+                if recvd.is_empty() {
+                    self.recv_buf = recvd;
+                    return (Poll::Ready(()), None);
+                }
             }
             Poll::Ready(1..) => {}
         }
@@ -237,6 +252,7 @@ where
         };
         match res {
             Ok(()) => {
+                self.backoff_count = 0; // reset backoff count when success 
                 let new_state = self.transition_idle();
                 cx.waker().wake_by_ref();
                 (Poll::Pending, Some(new_state))
@@ -248,7 +264,7 @@ where
                     error_count = self.backoff_count + 1,
                     ?backoff_time,
                     error = %e,
-                    "couldn't send logs to honeycomb",
+                    "couldn't send logs to axiom",
                 );
                 default_guard = tracing::subscriber::set_default(NoSubscriber::default());
                 if drop_outstanding {
@@ -320,14 +336,14 @@ pub struct BackgroundTaskFut<B: Backend>(BackgroundTaskInner<B>, State<B::Fut>);
 
 impl BackgroundTaskFut<ClientBackend> {
     pub fn new(
-        honeycomb_endpoint_url: Url,
+        axiom_endpoint_url: Url,
         http_headers: reqwest::header::HeaderMap,
         extra_fields: ExtraFields,
-        receiver: mpsc::Receiver<Option<HoneycombEvent>>,
+        receiver: mpsc::Receiver<Option<AxiomEvent>>,
     ) -> Self {
         Self::new_with_backend(
             extra_fields,
-            ClientBackend::new(honeycomb_endpoint_url, http_headers),
+            ClientBackend::new(axiom_endpoint_url, http_headers),
             receiver,
         )
     }
@@ -337,7 +353,7 @@ impl<B: Backend> BackgroundTaskFut<B> {
     pub fn new_with_backend(
         extra_fields: ExtraFields,
         backend: B,
-        receiver: mpsc::Receiver<Option<HoneycombEvent>>,
+        receiver: mpsc::Receiver<Option<AxiomEvent>>,
     ) -> Self {
         Self(
             BackgroundTaskInner {
@@ -381,11 +397,11 @@ pub type BackgroundTask = BackgroundTaskFut<ClientBackend>;
 ///
 /// It'll still try to send all available data and then quit.
 pub struct BackgroundTaskController {
-    sender: mpsc::Sender<Option<HoneycombEvent>>,
+    sender: mpsc::Sender<Option<AxiomEvent>>,
 }
 
 impl BackgroundTaskController {
-    pub fn new(sender: mpsc::Sender<Option<HoneycombEvent>>) -> Self {
+    pub fn new(sender: mpsc::Sender<Option<AxiomEvent>>) -> Self {
         Self { sender }
     }
 
@@ -406,8 +422,8 @@ impl BackgroundTaskController {
 mod tests {
     use super::*;
     use crate::{
-        CreateEventsPayload, HONEYCOMB_AUTH_HEADER_NAME, OTEL_FIELD_LEVEL, OTEL_FIELD_PARENT_ID,
-        OTEL_FIELD_SPAN_ID, OTEL_FIELD_TRACE_ID, SpanId, builder::DEFAULT_CHANNEL_SIZE,
+        CreateEventsPayload, EVENT_LEVEL, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID,
+        OTEL_FIELD_TRACE_ID, SpanId, builder::DEFAULT_CHANNEL_SIZE,
     };
     use axum::{
         Json, Router,
@@ -434,7 +450,7 @@ mod tests {
     use tracing_subscriber::{Layer, filter, layer::SubscriberExt};
 
     struct RecorderBackend {
-        events: Vec<HoneycombEvent>,
+        events: Vec<AxiomEvent>,
         induce_failure: bool,
     }
 
@@ -469,8 +485,8 @@ mod tests {
         }
     }
 
-    fn new_event(span_id: Option<u64>) -> HoneycombEvent {
-        HoneycombEvent {
+    fn new_event(span_id: Option<u64>) -> AxiomEvent {
+        AxiomEvent {
             time: OffsetDateTime::now_utc(),
             span_id: span_id.map(|i| SpanId::from(NonZeroU64::new(i).unwrap())),
             trace_id: None,
@@ -482,8 +498,10 @@ mod tests {
             idle_ns: None,
             level: "INFO",
             name: Cow::Borrowed("name"),
+            event_name: Cow::Borrowed("event name"),
             target: Cow::Borrowed("target"),
-            fields: Default::default(),
+            event_field: Default::default(),
+            kind: "client",
         }
     }
 
@@ -514,20 +532,20 @@ mod tests {
             RecorderBackend::new(),
             receiver,
         );
-        assert!(matches!(task.1, State::Idle));
+        debug_assert!(matches!(task.1, State::Idle));
 
         let evt = new_event(Some(1234));
         sender.blocking_send(Some(evt.clone())).unwrap();
         sender.blocking_send(Some(evt.clone())).unwrap();
 
         // Idle => Inflight
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Inflight(_)));
-        assert_eq!(task.0.inflight_reqs.len(), 2);
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Inflight(_)));
+        debug_assert_eq!(task.0.inflight_reqs.len(), 2);
 
         // add to queue while task is not processing new events
         sender
-            .blocking_send(Some(HoneycombEvent {
+            .blocking_send(Some(AxiomEvent {
                 time: evt.time,
                 span_id: Some(SpanId::from(NonZeroU64::new(1).unwrap())),
                 ..evt.clone()
@@ -535,28 +553,28 @@ mod tests {
             .unwrap();
 
         // send_task completes with Ok => idle
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Idle));
-        assert_eq!(task.0.backend.events.len(), 2);
-        assert_eq!(task.0.backend.events[0], evt);
-        assert_eq!(task.0.backend.events[1], evt);
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(task.0.backend.events.len(), 2);
+        debug_assert_eq!(task.0.backend.events[0], evt);
+        debug_assert_eq!(task.0.backend.events[1], evt);
 
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Inflight(_)));
-        assert_eq!(task.0.backend.events.len(), 3);
-        assert_eq!(
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Inflight(_)));
+        debug_assert_eq!(task.0.backend.events.len(), 3);
+        debug_assert_eq!(
             task.0.backend.events[2].span_id,
             Some(SpanId::from(NonZeroU64::new(1).unwrap()))
         );
 
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Idle));
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Idle));
 
         sender.blocking_send(None).unwrap();
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
-        assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
+        debug_assert!(matches!(task.1, State::Idle));
     }
 
     #[test]
@@ -570,10 +588,10 @@ mod tests {
             RecorderBackend::new(),
             receiver,
         );
-        assert!(matches!(task.1, State::Idle));
+        debug_assert!(matches!(task.1, State::Idle));
 
         drop(sender);
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
     }
 
     // need a runtime to even be able to construct tokio::time::sleep() futures, and
@@ -589,13 +607,13 @@ mod tests {
             RecorderBackend::new_induce_failure(),
             receiver,
         );
-        assert!(matches!(task.1, State::Idle));
+        debug_assert!(matches!(task.1, State::Idle));
 
         let evt = new_event(Some(1234));
         sender.send(Some(evt.clone())).await.unwrap();
         sender.send(Some(evt.clone())).await.unwrap();
 
-        assert_eq!(
+        debug_assert_eq!(
             task.0.backend.events.len(),
             0,
             "no events processed until poll"
@@ -608,29 +626,29 @@ mod tests {
             State::BackingOff(BackingOffState { task }) => task.await,
             _ => panic!("expected task to be in BackingOff state"),
         }
-        assert_eq!(
+        debug_assert_eq!(
             task.0.backend.events.len(),
             0,
             "events fail to submit due to induce_failure"
         );
 
         task.0.backend.induce_failure = false;
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Inflight(_)));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Inflight(_)));
 
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
-        assert!(matches!(task.1, State::Idle));
-        assert_eq!(
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
+        debug_assert!(matches!(task.1, State::Idle));
+        debug_assert_eq!(
             task.0.backend.events.len(),
             2,
             "events submit successfully after induce_failure disabled"
         );
 
         drop(sender);
-        assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
+        debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
     }
 
-    const MOCK_API_KEY: &str = "xxx-testing-api-key-xxx";
+    const MOCK_API_KEY: &str = "Bearer xxx-testing-api-key-xxx";
     const TESTING_HEADER_NAME: &str = "x-tested-header";
     const TESTING_HEADER_VALUE: &str = "tested-header-value";
     const TEST_EXTRA_FIELD_NAME: &str = "test.extra_field";
@@ -642,8 +660,13 @@ mod tests {
 
     #[derive(Clone, Debug, Deserialize)]
     struct WrappedEvent {
+        #[serde(default, alias = "_time")]
         time: String,
-        data: ApiEvent,
+        events: ApiEvent,
+        attributes: Option<ApiEvent>,
+        resources: Option<ApiEvent>,
+        #[serde(flatten)]
+        top_level: ApiEvent,
     }
     type DatasetPayload = Vec<WrappedEvent>;
 
@@ -663,7 +686,7 @@ mod tests {
     }
 
     async fn middleware_auth_with_mock_key(request: Request, next: Next) -> Response {
-        let api_key = match request.headers().get(HONEYCOMB_AUTH_HEADER_NAME) {
+        let api_key = match request.headers().get(reqwest::header::AUTHORIZATION) {
             None => {
                 return (
                     StatusCode::UNAUTHORIZED,
@@ -680,7 +703,7 @@ mod tests {
     }
 
     async fn middleware_zstd_decompress(request: Request, next: Next) -> Response {
-        assert_eq!(
+        debug_assert_eq!(
             request
                 .headers()
                 .get(reqwest::header::CONTENT_ENCODING)
@@ -688,8 +711,8 @@ mod tests {
             Some("zstd")
         );
 
-        let (parts, body) = request.into_parts();
-        let bytes = axum::body::to_bytes(body, 8192).await.unwrap();
+        let (mut parts, body) = request.into_parts();
+        let bytes = axum::body::to_bytes(body, 10 * 1024 * 1024).await.unwrap();
 
         let new_body = match zstd::decode_all(Cursor::new(bytes.to_vec())) {
             Err(e) => {
@@ -702,6 +725,7 @@ mod tests {
             }
             Ok(b) => b,
         };
+        parts.headers.remove(reqwest::header::CONTENT_ENCODING);
         let req = Request::from_parts(parts, new_body.into());
 
         next.run(req).await
@@ -713,7 +737,7 @@ mod tests {
         Path(dataset): Path<String>,
         Json(payload): Json<DatasetPayload>,
     ) -> Response {
-        assert_eq!(
+        debug_assert_eq!(
             headers
                 .get(TESTING_HEADER_NAME)
                 .and_then(|v| v.to_str().ok()),
@@ -735,22 +759,49 @@ mod tests {
 
         payload.iter().for_each(|evt| {
             tracing::debug!(ts = ?evt.time, "got span with timestamp");
-            evt.data.iter().for_each(|(k, v)| {
-                assert!(
-                    !matches!(
-                        v,
-                        serde_json::Value::Array(_) | serde_json::Value::Object(_)
-                    ),
-                    "event must be depth 1: {} = {}",
-                    k,
-                    v
-                )
-            })
+            let nested_fields: [(&str, Option<&ApiEvent>); 4] = [
+                ("events", Some(&evt.events)),
+                ("attributes", evt.attributes.as_ref()),
+                ("resources", evt.resources.as_ref()),
+                ("top_level", Some(&evt.top_level)),
+            ];
+
+            for (name, fields) in nested_fields {
+                if let Some(field) = fields {
+                    for (k, v) in field {
+                        debug_assert!(
+                            !matches!(
+                                v,
+                                serde_json::Value::Array(_) | serde_json::Value::Object(_)
+                            ),
+                            "{} must be depth 1: {} = {}",
+                            name,
+                            k,
+                            v
+                        );
+                    }
+                }
+            }
         });
 
         match state.datasets.write().unwrap().entry(dataset.to_string()) {
-            Entry::Vacant(e) => drop(e.insert(payload.into_iter().map(|e| e.data).collect())),
-            Entry::Occupied(mut e) => e.get_mut().extend(payload.into_iter().map(|e| e.data)),
+            Entry::Vacant(e) => {
+                e.insert(
+                    payload
+                        .into_iter()
+                        .map(|ev| {
+                            let mut merged = ev.top_level;
+                            merged.extend(ev.resources.unwrap());
+                            merged.extend(ev.attributes.unwrap());
+                            merged.extend(ev.events);
+                            merged
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            Entry::Occupied(mut e) => {
+                e.get_mut().extend(payload.into_iter().map(|e| e.events));
+            }
         };
 
         Json(json!({"status": 200})).into_response()
@@ -761,7 +812,10 @@ mod tests {
         (
             state.clone(),
             Router::new()
-                .route("/1/batch/{dataset}", post(post_create_events))
+                .route(
+                    "/v1/datasets/{dataset_name}/ingest",
+                    post(post_create_events),
+                )
                 .layer(middleware::from_fn(middleware_zstd_decompress))
                 .layer(middleware::from_fn(middleware_auth_with_mock_key))
                 .with_state(state),
@@ -792,7 +846,6 @@ mod tests {
             .unwrap()
             .build(&api_host, TESTING_DATASET)
             .unwrap();
-
         let _server_join_handle = tokio::spawn(serve_task.with_current_subscriber());
         let bg_join_handle = tokio::spawn(bg_task.with_current_subscriber());
 
@@ -802,7 +855,7 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::span!(target: "span-test-target", tracing::Level::WARN, "span name", span.field = 40);
             let _enter = span.enter();
-            tracing::event!(name: "test-name", target: "test-target", tracing::Level::INFO, event.field = 41, "event message");
+            tracing::event!(name: "test-name", target: "test-target", tracing::Level::INFO, event.field = 41, "end-to-end submit event message");
         });
         // flush all of the events
         bg_task_controller.shutdown().await;
@@ -810,35 +863,36 @@ mod tests {
 
         // get an exclusive copy so that we don't have to go through the lock all the time
         let datasets = state.datasets.read().unwrap().clone();
-        assert_eq!(datasets.len(), 1, "expected single dataset");
+
+        debug_assert_eq!(datasets.len(), 1, "expected single dataset");
         let test_dataset = datasets
             .get(TESTING_DATASET)
             .expect("single dataset to be testing dataset");
-        assert_eq!(
+        debug_assert_eq!(
             test_dataset.len(),
             2,
             "expected exactly one event and one span close"
         );
         let log_event = &test_dataset[0];
-        assert_eq!(log_event.get("event.field"), Some(&json!(41)));
-        assert_eq!(log_event.get("span.field"), Some(&json!(40)));
-        assert_eq!(log_event.get(OTEL_FIELD_LEVEL), Some(&json!("info")));
-        assert_eq!(log_event.get("target"), Some(&json!("test-target")));
-        assert_eq!(log_event.get("name"), Some(&json!("test-name")));
+        debug_assert_eq!(log_event.get("event.field"), Some(&json!(41)));
+        debug_assert_eq!(log_event.get("span.field"), Some(&json!(40)));
+        debug_assert_eq!(log_event.get(EVENT_LEVEL), Some(&json!("info")));
+        debug_assert_eq!(log_event.get("target"), Some(&json!("test-target")));
+        debug_assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
         let trace_id = log_event.get(OTEL_FIELD_TRACE_ID).unwrap();
 
         let span_event = &test_dataset[1];
-        assert_eq!(span_event.get("event.field"), None);
-        assert_eq!(span_event.get("span.field"), Some(&json!(40)));
-        assert_eq!(span_event.get(OTEL_FIELD_LEVEL), Some(&json!("warn")));
-        assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
-        assert_eq!(span_event.get("name"), Some(&json!("span name")));
-        assert!(span_event.get(OTEL_FIELD_SPAN_ID).is_some());
-        assert_eq!(
+        debug_assert_eq!(span_event.get("event.field"), None);
+        debug_assert_eq!(span_event.get("span.field"), Some(&json!(40)));
+        debug_assert_eq!(span_event.get(EVENT_LEVEL), Some(&json!("warn")));
+        debug_assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
+        debug_assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
+        debug_assert!(span_event.get(OTEL_FIELD_SPAN_ID).is_some());
+        debug_assert_eq!(
             log_event.get(OTEL_FIELD_PARENT_ID),
             Some(span_event.get(OTEL_FIELD_SPAN_ID).unwrap())
         );
-        assert_eq!(span_event.get(OTEL_FIELD_TRACE_ID), Some(trace_id));
+        debug_assert_eq!(span_event.get(OTEL_FIELD_TRACE_ID), Some(trace_id));
     }
 
     #[tokio::test]
@@ -847,7 +901,7 @@ mod tests {
             .event(
                 expect::event()
                     .at_level(Level::ERROR)
-                    .with_fields(expect::msg("couldn't send logs to honeycomb"))
+                    .with_fields(expect::msg("couldn't send logs to axiom"))
                     .with_fields(expect::field("error")), // the underlying reqwest error
             )
             .run_with_handle();
@@ -884,7 +938,7 @@ mod tests {
             .with(honey_layer)
             .with(tracing_subscriber::fmt::layer());
         tracing::subscriber::with_default(subscriber, || {
-            tracing::event!(Level::INFO, "event message");
+            tracing::event!(Level::INFO, "end-to-end retry event message");
         });
 
         // since (for now) we don't continue retrying after shutdown signal, give some
@@ -901,15 +955,15 @@ mod tests {
         honey_bg_join_handle.await.unwrap();
         handle.assert_finished();
 
-        assert_eq!(
+        debug_assert_eq!(
             *state.req_count.lock().unwrap(),
             2,
             "expected induce error test to take exactly 2 request to suceed",
         );
         // get an exclusive copy so that we don't have to go through the lock all the time
         let datasets = state.datasets.read().unwrap().clone();
-        assert_eq!(datasets.len(), 1, "expected dataset to be recorded");
-        assert_eq!(
+        debug_assert_eq!(datasets.len(), 1, "expected dataset to be recorded");
+        debug_assert_eq!(
             datasets.values().next().unwrap().len(),
             1,
             "expected single event in dataset"

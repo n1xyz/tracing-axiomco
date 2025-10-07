@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc;
-use tracing_honeycombio::{
+use tracing_axiomco::{
     CreateEventsPayload, Value,
     background::{Backend, BackgroundTaskFut},
     builder::DEFAULT_CHANNEL_SIZE,
@@ -49,7 +49,7 @@ fn single_event() {
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {
-    // note: work neeeded if criterion.rs ever starts using tracing internally
+    // note: work needed if criterion.rs ever starts using tracing internally
     c.bench_function("single_event", |b| {
         b.iter_custom(|iters| {
             let extra_fields: Vec<(Cow<'static, str>, Value)> = vec![
@@ -58,7 +58,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             ];
 
             let (sender, receiver) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
-            let layer = tracing_honeycombio::layer::Layer::new(
+            let layer = tracing_axiomco::layer::Layer::new(
                 black_box(Some("my-cool-service-name".into())),
                 black_box(sender.clone()),
             );
@@ -109,5 +109,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().sample_size(300);
+    targets = criterion_benchmark
+}
 criterion_main!(benches);

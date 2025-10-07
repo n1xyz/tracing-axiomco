@@ -1883,17 +1883,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-core"
-version = "0.1.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
-dependencies = [
- "once_cell",
- "valuable",
-]
-
-[[package]]
-name = "tracing-honeycombio"
+name = "tracing-axiomco"
 version = "0.1.0"
 dependencies = [
  "axum",
@@ -1906,9 +1896,20 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "tracing-core",
  "tracing-mock",
  "tracing-subscriber",
  "zstd",
+]
+
+[[package]]
+name = "tracing-core"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
+dependencies = [
+ "once_cell",
+ "valuable",
 ]
 
 [[package]]
