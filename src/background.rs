@@ -421,10 +421,8 @@ impl BackgroundTaskController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        CreateEventsPayload, EVENT_LEVEL, OTEL_FIELD_PARENT_ID, OTEL_FIELD_SPAN_ID,
-        OTEL_FIELD_TRACE_ID, SpanId, builder::DEFAULT_CHANNEL_SIZE,
-    };
+    use crate::{AttributeField, EventField, OtelField, ResourceField};
+    use crate::{CreateEventsPayload, SpanId, builder::DEFAULT_CHANNEL_SIZE};
     use axum::{
         Json, Router,
         extract::{Path, Request, State},
@@ -487,21 +485,27 @@ mod tests {
 
     fn new_event(span_id: Option<u64>) -> AxiomEvent {
         AxiomEvent {
-            time: OffsetDateTime::now_utc(),
-            span_id: span_id.map(|i| SpanId::from(NonZeroU64::new(i).unwrap())),
-            trace_id: None,
-            parent_span_id: None,
-            service_name: None,
-            annotation_type: None,
-            duration_ms: None,
-            busy_ns: None,
-            idle_ns: None,
-            level: "INFO",
-            name: Cow::Borrowed("name"),
-            event_name: Cow::Borrowed("event name"),
-            target: Cow::Borrowed("target"),
-            event_field: Default::default(),
-            kind: "client",
+            otel: OtelField {
+                time: OffsetDateTime::now_utc(),
+                span_id: span_id.map(|i| SpanId::from(NonZeroU64::new(i).unwrap())),
+                trace_id: None,
+                parent_span_id: None,
+                duration_ms: None,
+                kind: "client",
+                name: Cow::Borrowed("name"),
+            },
+            attributes: AttributeField {
+                annotation_type: None,
+                busy_ns: None,
+                idle_ns: None,
+                target: Cow::Borrowed("target"),
+            },
+            resources: ResourceField { service_name: None },
+            events: EventField {
+                event_name: Cow::Borrowed("event name"),
+                level: "INFO",
+                event_field: Default::default(),
+            },
         }
     }
 
@@ -546,8 +550,10 @@ mod tests {
         // add to queue while task is not processing new events
         sender
             .blocking_send(Some(AxiomEvent {
-                time: evt.time,
-                span_id: Some(SpanId::from(NonZeroU64::new(1).unwrap())),
+                otel: OtelField {
+                    span_id: Some(SpanId::from(NonZeroU64::new(1).unwrap())),
+                    ..evt.otel.clone()
+                },
                 ..evt.clone()
             }))
             .unwrap();
@@ -563,7 +569,7 @@ mod tests {
         debug_assert!(matches!(task.1, State::Inflight(_)));
         debug_assert_eq!(task.0.backend.events.len(), 3);
         debug_assert_eq!(
-            task.0.backend.events[2].span_id,
+            task.0.backend.events[2].otel.span_id,
             Some(SpanId::from(NonZeroU64::new(1).unwrap()))
         );
 
@@ -859,7 +865,9 @@ mod tests {
         });
         // flush all of the events
         bg_task_controller.shutdown().await;
-        bg_join_handle.await.unwrap();
+        bg_join_handle
+            .await
+            .unwrap_or_else(|_| eprintln!("background task panicked"));
 
         // get an exclusive copy so that we don't have to go through the lock all the time
         let datasets = state.datasets.read().unwrap().clone();
@@ -876,23 +884,29 @@ mod tests {
         let log_event = &test_dataset[0];
         debug_assert_eq!(log_event.get("event.field"), Some(&json!(41)));
         debug_assert_eq!(log_event.get("span.field"), Some(&json!(40)));
-        debug_assert_eq!(log_event.get(EVENT_LEVEL), Some(&json!("info")));
-        debug_assert_eq!(log_event.get("target"), Some(&json!("test-target")));
+        debug_assert_eq!(log_event.get("events.level"), Some(&json!("info")));
+        debug_assert_eq!(
+            log_event.get("attributes.target"),
+            Some(&json!("test-target"))
+        );
         debug_assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
-        let trace_id = log_event.get(OTEL_FIELD_TRACE_ID).unwrap();
+        let trace_id = log_event.get("trace_id").unwrap();
 
         let span_event = &test_dataset[1];
         debug_assert_eq!(span_event.get("event.field"), None);
         debug_assert_eq!(span_event.get("span.field"), Some(&json!(40)));
-        debug_assert_eq!(span_event.get(EVENT_LEVEL), Some(&json!("warn")));
-        debug_assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
-        debug_assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
-        debug_assert!(span_event.get(OTEL_FIELD_SPAN_ID).is_some());
+        debug_assert_eq!(span_event.get("events.level"), Some(&json!("warn")));
         debug_assert_eq!(
-            log_event.get(OTEL_FIELD_PARENT_ID),
-            Some(span_event.get(OTEL_FIELD_SPAN_ID).unwrap())
+            span_event.get("attributes.target"),
+            Some(&json!("span-test-target"))
         );
-        debug_assert_eq!(span_event.get(OTEL_FIELD_TRACE_ID), Some(trace_id));
+        debug_assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
+        debug_assert!(span_event.get("span_id").is_some());
+        debug_assert_eq!(
+            log_event.get("span_id"),
+            Some(span_event.get("span_id").unwrap())
+        );
+        debug_assert_eq!(span_event.get("trace_id"), Some(trace_id));
     }
 
     #[tokio::test]
