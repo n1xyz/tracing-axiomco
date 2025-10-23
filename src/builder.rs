@@ -168,8 +168,8 @@ pub fn builder(api_key: &str) -> Builder {
         http_headers: HeaderMap::new(),
         event_channel_size: DEFAULT_CHANNEL_SIZE,
     };
-    let mut auth_value =
-        header::HeaderValue::from_str(api_key).expect("api_key to be a valid HTTP header value");
+    let mut auth_value = header::HeaderValue::from_str(format!("Bearer {}", api_key).as_str())
+        .expect("api_key to be a valid HTTP header value");
     auth_value.set_sensitive(true);
     builder
         .http_headers

@@ -396,6 +396,7 @@ pub type BackgroundTask = BackgroundTaskFut<ClientBackend>;
 /// Handle to cleanly shut down the `BackgroundTask`.
 ///
 /// It'll still try to send all available data and then quit.
+#[derive(Clone)]
 pub struct BackgroundTaskController {
     sender: mpsc::Sender<Option<AxiomEvent>>,
 }
@@ -415,6 +416,13 @@ impl BackgroundTaskController {
     /// execution context.
     pub fn shutdown_blocking(&self) {
         let _ = self.sender.blocking_send(None);
+    }
+
+    pub async fn export_metrics(
+        &self,
+        event: AxiomEvent,
+    ) -> Result<(), mpsc::error::SendError<Option<AxiomEvent>>> {
+        self.sender.send(Some(event)).await
     }
 }
 
@@ -654,7 +662,7 @@ mod tests {
         debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Ready(()));
     }
 
-    const MOCK_API_KEY: &str = "Bearer xxx-testing-api-key-xxx";
+    const MOCK_API_KEY: &str = "xxx-testing-api-key-xxx";
     const TESTING_HEADER_NAME: &str = "x-tested-header";
     const TESTING_HEADER_VALUE: &str = "tested-header-value";
     const TEST_EXTRA_FIELD_NAME: &str = "test.extra_field";
@@ -664,12 +672,15 @@ mod tests {
     type ApiEvent = HashMap<String, serde_json::Value>;
     type Dataset = Vec<ApiEvent>;
 
-    #[derive(Clone, Debug, Deserialize)]
+    #[derive(Clone, Debug, Deserialize, serde::Serialize)]
     struct WrappedEvent {
-        #[serde(default, alias = "_time")]
+        #[serde(default, rename = "_time")]
         time: String,
+        #[serde(default)]
         events: ApiEvent,
+        #[serde(skip_serializing_if = "Option::is_none")]
         attributes: Option<ApiEvent>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         resources: Option<ApiEvent>,
         #[serde(flatten)]
         top_level: ApiEvent,
@@ -702,7 +713,8 @@ mod tests {
             }
             Some(api_key) => api_key,
         };
-        if api_key != MOCK_API_KEY {
+        let mock_api_header_value = format!("Bearer {}", &MOCK_API_KEY);
+        if api_key != mock_api_header_value.as_str() {
             return (StatusCode::FORBIDDEN, "invalid API key").into_response();
         }
         next.run(request).await
@@ -764,7 +776,6 @@ mod tests {
         }
 
         payload.iter().for_each(|evt| {
-            tracing::debug!(ts = ?evt.time, "got span with timestamp");
             let nested_fields: [(&str, Option<&ApiEvent>); 4] = [
                 ("events", Some(&evt.events)),
                 ("attributes", evt.attributes.as_ref()),
@@ -775,6 +786,11 @@ mod tests {
             for (name, fields) in nested_fields {
                 if let Some(field) = fields {
                     for (k, v) in field {
+                        // default Deserialize trait will collect this into top level
+                        if k.contains("extra_fields") {
+                            continue;
+                        }
+
                         debug_assert!(
                             !matches!(
                                 v,
@@ -884,26 +900,20 @@ mod tests {
         let log_event = &test_dataset[0];
         debug_assert_eq!(log_event.get("event.field"), Some(&json!(41)));
         debug_assert_eq!(log_event.get("span.field"), Some(&json!(40)));
-        debug_assert_eq!(log_event.get("events.level"), Some(&json!("info")));
-        debug_assert_eq!(
-            log_event.get("attributes.target"),
-            Some(&json!("test-target"))
-        );
+        debug_assert_eq!(log_event.get("level"), Some(&json!("info")));
+        debug_assert_eq!(log_event.get("target"), Some(&json!("test-target")));
         debug_assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
         let trace_id = log_event.get("trace_id").unwrap();
 
         let span_event = &test_dataset[1];
         debug_assert_eq!(span_event.get("event.field"), None);
         debug_assert_eq!(span_event.get("span.field"), Some(&json!(40)));
-        debug_assert_eq!(span_event.get("events.level"), Some(&json!("warn")));
-        debug_assert_eq!(
-            span_event.get("attributes.target"),
-            Some(&json!("span-test-target"))
-        );
+        debug_assert_eq!(span_event.get("level"), Some(&json!("warn")));
+        debug_assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
         debug_assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
         debug_assert!(span_event.get("span_id").is_some());
         debug_assert_eq!(
-            log_event.get("span_id"),
+            log_event.get("parent_span_id"),
             Some(span_event.get("span_id").unwrap())
         );
         debug_assert_eq!(span_event.get("trace_id"), Some(trace_id));

@@ -400,6 +400,8 @@ impl<'a> Serialize for CreateEventsPayload<'a> {
 
 #[derive(Serialize)]
 struct CreateEventPayload<'a> {
+    #[serde(flatten)]
     event: &'a AxiomEvent,
+    #[serde(skip_deserializing)]
     extra_fields: &'a ExtraFields,
 }
