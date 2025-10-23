@@ -13,6 +13,7 @@ async fn main() {
     let api_key =
         std::env::var("AXIOM_API_KEY").expect("AXIOM_API_KEY environment variable to be valid");
     let (layer, task, controller) = tracing_axiomco::builder(&api_key)
+        .service_name(std::borrow::Cow::Borrowed("test integration"))
         .build(tracing_axiomco::AXIOM_SERVER_US, AXIOM_TEST_DATASET_NAME)
         .unwrap();
     let handle = tokio::spawn(task);
@@ -26,8 +27,8 @@ async fn main() {
 
     for work_id in 0..4 {
         tasks.push(tokio::spawn(async move {
-            let payload = "x".repeat(1_047_000);
-            for i in 0..40 {
+            let payload = "x".repeat(5);
+            for i in 0..1 {
                 let gp_span = tracing::span!(
                     Level::INFO,
                     "gp span",
@@ -52,7 +53,7 @@ async fn main() {
                     {
                         let msg: String = format!("random event No. {i} duplicate");
 
-                        tracing::event!(Level::WARN, message = msg, event_iteration = i, big_msg = %payload, link_metadata.trace_id = "0a95aacc7f732e4831667e9ffa5129ed");
+                        tracing::event!(Level::WARN, message = msg, event_iteration = i, big_msg = %payload);
                     }
                 }
             }

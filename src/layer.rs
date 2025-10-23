@@ -5,7 +5,10 @@ use tokio::sync::mpsc;
 use tracing::{Level, Subscriber, span};
 use tracing_subscriber::registry::LookupSpan;
 
-use crate::{AxiomEvent, Fields, SpanId, SpanKind, TraceId};
+use crate::{
+    AttributeField, AxiomEvent, EventField, Fields, OtelField, ResourceField, SpanId, SpanKind,
+    TraceId,
+};
 
 fn level_as_axiom_str(level: &Level) -> &'static str {
     match *level {
@@ -166,23 +169,31 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         event.record(&mut fields);
         // don't care if channel closed. if capacity is reached, we have larger problems
         let _ = self.sender.try_send(Some(AxiomEvent {
-            time: timestamp,
-            span_id: None,
-            trace_id: span
-                .as_ref()
-                .and_then(|s| s.extensions().get::<TraceId>().copied()),
-            parent_span_id: span.and_then(|s| s.extensions().get::<SpanId>().copied()),
-            service_name: self.service_name.clone(),
-            annotation_type: Some(Cow::Borrowed("span_event")),
-            duration_ms: None,
-            idle_ns: None,
-            busy_ns: None,
-            level: level_as_axiom_str(meta.level()),
-            event_name: Cow::Borrowed(meta.name()),
-            target: Cow::Borrowed(meta.target()),
-            name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
-            event_field: fields,
-            kind: kind_as_axiom_str(&SpanKind::CLIENT),
+            otel: OtelField {
+                time: timestamp,
+                span_id: None,
+                trace_id: span
+                    .as_ref()
+                    .and_then(|s| s.extensions().get::<TraceId>().copied()),
+                parent_span_id: span.and_then(|s| s.extensions().get::<SpanId>().copied()),
+                kind: kind_as_axiom_str(&SpanKind::CLIENT),
+                name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
+                duration_ms: None,
+            },
+            attributes: AttributeField {
+                annotation_type: Some(Cow::Borrowed("span_event")),
+                idle_ns: None,
+                busy_ns: None,
+                target: Cow::Borrowed(meta.target()),
+            },
+            events: EventField {
+                level: level_as_axiom_str(meta.level()),
+                event_name: Cow::Borrowed(meta.name()),
+                event_field: fields,
+            },
+            resources: ResourceField {
+                service_name: self.service_name.clone(),
+            },
         }));
     }
 
@@ -233,33 +244,37 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         let trace_id = span.extensions_mut().remove::<TraceId>();
 
         let _ = self.sender.try_send(Some(AxiomEvent {
-            time: timestamp,
-            span_id: span.extensions_mut().remove::<SpanId>(),
-            trace_id,
-            parent_span_id: span
-                .parent()
-                .and_then(|p| p.extensions().get::<SpanId>().copied()),
-            service_name: self.service_name.clone(),
-            annotation_type: None,
-            duration_ms,
-            idle_ns,
-            busy_ns,
-            level: level_as_axiom_str(meta.level()),
-            event_name: Cow::Borrowed(meta.name()),
-            target: Cow::Borrowed(meta.target()),
-            name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
-            event_field: fields,
-            kind: kind_as_axiom_str(&SpanKind::CLIENT),
+            otel: OtelField {
+                time: timestamp,
+                span_id: span.extensions_mut().remove::<SpanId>(),
+                trace_id,
+                parent_span_id: span
+                    .parent()
+                    .and_then(|p| p.extensions().get::<SpanId>().copied()),
+                kind: kind_as_axiom_str(&SpanKind::CLIENT),
+                name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
+                duration_ms,
+            },
+            attributes: AttributeField {
+                annotation_type: None,
+                idle_ns,
+                busy_ns,
+                target: Cow::Borrowed(meta.target()),
+            },
+            events: EventField {
+                level: level_as_axiom_str(meta.level()),
+                event_name: Cow::Borrowed(meta.name()),
+                event_field: fields,
+            },
+            resources: ResourceField {
+                service_name: self.service_name.clone(),
+            },
         }));
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::{
-        ATTR_TARGET, EVENT_LEVEL, OTEL_FIELD_KIND, OTEL_FIELD_NAME, OTEL_FIELD_PARENT_ID,
-        OTEL_FIELD_SPAN_ID, OTEL_FIELD_TIMESTAMP, RESOURCES_SERVICE_NAME,
-    };
 
     use super::*;
     use serde_json::{Value, json};
@@ -356,14 +371,17 @@ pub(crate) mod tests {
         );
         let events = events.into_iter().map(|i| i.unwrap()).collect::<Vec<_>>();
         assert_eq!(
-            events.iter().map(|evt| evt.trace_id).collect::<Vec<_>>(),
-            std::iter::repeat_n(Some(events[0].trace_id.unwrap()), events.len())
+            events
+                .iter()
+                .map(|evt| evt.otel.trace_id)
+                .collect::<Vec<_>>(),
+            std::iter::repeat_n(Some(events[0].otel.trace_id.unwrap()), events.len())
                 .collect::<Vec<_>>()
         );
         assert_eq!(
             events
                 .iter()
-                .map(|evt| (evt.parent_span_id, evt.span_id))
+                .map(|evt| (evt.otel.parent_span_id, evt.otel.span_id))
                 .collect::<Vec<_>>(),
             vec![
                 (Some(child_id), None),                  // the event
@@ -375,7 +393,7 @@ pub(crate) mod tests {
         assert_eq!(
             events
                 .iter()
-                .map(|evt| evt.event_field.fields.get("overridden_field"))
+                .map(|evt| evt.events.event_field.fields.get("overridden_field"))
                 .collect::<Vec<_>>(),
             vec![
                 (Some(&or_val_e.into())),  // the event
@@ -393,18 +411,17 @@ pub(crate) mod tests {
                 val
             ),
         };
-
-        debug_assert_eq!(root.get(OTEL_FIELD_SPAN_ID), None);
-        debug_assert_eq!(root.get(OTEL_FIELD_PARENT_ID), Some(&json!(child_id)));
-        debug_assert_eq!(root.get(OTEL_FIELD_KIND), Some(&json!("client")));
+        debug_assert_eq!(root.get("span_id"), None);
+        debug_assert_eq!(root.get("parent_span_id"), Some(&json!(child_id)));
+        debug_assert_eq!(root.get("kind"), Some(&json!("client")));
         debug_assert_eq!(
-            root.get(OTEL_FIELD_NAME),
+            root.get("name"),
             Some(&json!(format!(
                 "{}::layer::tests",
                 env!("CARGO_CRATE_NAME")
             )))
         );
-        debug_assert_eq!(root.get(OTEL_FIELD_KIND).unwrap(), "client");
+        debug_assert_eq!(root.get("kind").unwrap(), "client");
 
         let ev_map = match root.get("attributes").unwrap() {
             Value::Object(data) => data,
@@ -412,7 +429,7 @@ pub(crate) mod tests {
         };
         check_ev_map_depth_one(ev_map);
         debug_assert_eq!(
-            ev_map.get(ATTR_TARGET),
+            ev_map.get("target"),
             Some(&json!(format!(
                 "{}::layer::tests",
                 env!("CARGO_CRATE_NAME")
@@ -424,10 +441,7 @@ pub(crate) mod tests {
             _ => panic!("data key has unexpected type"),
         };
         check_ev_map_depth_one(ev_map);
-        debug_assert_eq!(
-            ev_map.get(RESOURCES_SERVICE_NAME),
-            Some(&json!("service_name"))
-        );
+        debug_assert_eq!(ev_map.get("service_name"), Some(&json!("service_name")));
 
         let ev_map = match root.get("events").unwrap() {
             Value::Object(data) => data,
@@ -435,11 +449,11 @@ pub(crate) mod tests {
         };
         check_ev_map_depth_one(ev_map);
 
-        debug_assert_eq!(ev_map.get(EVENT_LEVEL), Some(&json!("info")));
+        debug_assert_eq!(ev_map.get("level"), Some(&json!("info")));
         debug_assert!(
-            before <= log_event.time && log_event.time <= after,
+            before <= log_event.otel.time && log_event.otel.time <= after,
             "invalid timestamp: {:#?}",
-            ev_map.get(OTEL_FIELD_TIMESTAMP)
+            ev_map.get("time")
         );
 
         //"event_name" field is based on line number so cannot be easily checked
@@ -452,7 +466,11 @@ pub(crate) mod tests {
 
         let child_closing_event = events.get(1).unwrap();
         debug_assert_eq!(
-            child_closing_event.event_field.fields.get("child_field"),
+            child_closing_event
+                .events
+                .event_field
+                .fields
+                .get("child_field"),
             Some(&42.into())
         );
 
@@ -483,9 +501,9 @@ pub(crate) mod tests {
         };
         check_ev_map_depth_one(ev_map);
 
-        debug_assert_eq!(root.get(OTEL_FIELD_SPAN_ID), Some(&json!(parent_id)));
-        debug_assert_eq!(root.get(OTEL_FIELD_PARENT_ID), Some(&json!(grandparent_id)));
-        debug_assert_eq!(ev_map.get("event_field"), None);
+        debug_assert_eq!(root.get("span_id"), Some(&json!(parent_id)));
+        debug_assert_eq!(root.get("parent_span_id"), Some(&json!(grandparent_id)));
+        debug_assert_eq!(ev_map.get("events.event_field"), None);
         debug_assert_eq!(ev_map.get("child_field"), None);
         debug_assert_eq!(ev_map.get("parent_field"), Some(&json!(p_val)));
         debug_assert_eq!(ev_map.get("grandparent_field"), Some(&json!(gp_val)));
@@ -517,10 +535,10 @@ pub(crate) mod tests {
         assert_eq!(receiver.blocking_recv_many(&mut events, 128), 3);
         let event = events[0].take().unwrap();
         debug_assert_eq!(
-            event.event_field.fields.get("message"),
+            event.events.event_field.fields.get("message"),
             Some(&"message".into())
         );
-        debug_assert_eq!(event.span_id, None);
-        debug_assert_eq!(event.parent_span_id, Some(parent_id));
+        debug_assert_eq!(event.otel.span_id, None);
+        debug_assert_eq!(event.otel.parent_span_id, Some(parent_id));
     }
 }
