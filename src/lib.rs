@@ -310,16 +310,6 @@ pub enum SpanKind {
     CONSUMER,
 }
 
-fn serialize_time<S>(time: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let s = time
-        .format(&time::format_description::well_known::Rfc3339)
-        .map_err(serde::ser::Error::custom)?;
-    serializer.serialize_str(&s)
-}
-
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct OtelField {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -330,9 +320,9 @@ pub struct OtelField {
     pub parent_span_id: Option<SpanId>,
     pub kind: &'static str,
     pub name: Cow<'static, str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "duration", skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
-    #[serde(rename = "_time", serialize_with = "serialize_time")]
+    #[serde(rename = "_time", with = "time::serde::rfc3339")]
     pub time: OffsetDateTime,
 }
 
@@ -372,6 +362,7 @@ pub struct AxiomEvent {
     // events field
     pub events: EventField,
     // resources field
+    #[serde(default)]
     pub resources: ResourceField,
 }
 
