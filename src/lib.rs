@@ -368,10 +368,24 @@ pub struct AxiomEvent {
     pub resources: ResourceField,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct AxiomMetric {
+    pub name: Cow<'static, str>,
+    pub metrics: HashMap<Cow<'static, str>, Value>,
+    // pub description: MetricDescription, // TODO move def from recorder to here
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum AxiomMsg {
+    Event(AxiomEvent),
+    Metric(AxiomMetric),
+}
+
 pub type ExtraFields = Vec<(Cow<'static, str>, Value)>;
 
 pub struct CreateEventsPayload<'a> {
-    events: &'a Vec<AxiomEvent>,
+    events: &'a Vec<AxiomMsg>,
     extra_fields: &'a ExtraFields,
 }
 
@@ -394,7 +408,7 @@ impl<'a> Serialize for CreateEventsPayload<'a> {
 #[derive(Serialize)]
 struct CreateEventPayload<'a> {
     #[serde(flatten)]
-    event: &'a AxiomEvent,
+    event: &'a AxiomMsg,
     #[serde(skip_deserializing)]
     extra_fields: &'a ExtraFields,
 }

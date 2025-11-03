@@ -6,8 +6,8 @@ use tracing::{Level, Subscriber, span};
 use tracing_subscriber::registry::LookupSpan;
 
 use crate::{
-    AttributeField, AxiomEvent, EventField, Fields, OtelField, ResourceField, SpanId, SpanKind,
-    TraceId,
+    AttributeField, AxiomEvent, AxiomMsg, EventField, Fields, OtelField, ResourceField, SpanId,
+    SpanKind, TraceId,
 };
 
 fn level_as_axiom_str(level: &Level) -> &'static str {
@@ -56,13 +56,13 @@ impl Timings {
 
 pub struct Layer {
     service_name: Option<Cow<'static, str>>,
-    sender: mpsc::Sender<Option<AxiomEvent>>,
+    sender: mpsc::Sender<Option<AxiomMsg>>,
 }
 
 impl Layer {
     pub fn new(
         service_name: Option<Cow<'static, str>>,
-        sender: mpsc::Sender<Option<AxiomEvent>>,
+        sender: mpsc::Sender<Option<AxiomMsg>>,
     ) -> Self {
         Self {
             service_name,
@@ -168,7 +168,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         }
         event.record(&mut fields);
         // don't care if channel closed. if capacity is reached, we have larger problems
-        let _ = self.sender.try_send(Some(AxiomEvent {
+        let _ = self.sender.try_send(Some(AxiomMsg::Event(AxiomEvent {
             otel: OtelField {
                 time: timestamp,
                 span_id: None,
@@ -194,7 +194,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             resources: ResourceField {
                 service_name: self.service_name.clone(),
             },
-        }));
+        })));
     }
 
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
@@ -243,7 +243,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         span.extensions_mut().remove::<Fields>();
         let trace_id = span.extensions_mut().remove::<TraceId>();
 
-        let _ = self.sender.try_send(Some(AxiomEvent {
+        let _ = self.sender.try_send(Some(AxiomMsg::Event(AxiomEvent {
             otel: OtelField {
                 time: timestamp,
                 span_id: span.extensions_mut().remove::<SpanId>(),
@@ -269,7 +269,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             resources: ResourceField {
                 service_name: self.service_name.clone(),
             },
-        }));
+        })));
     }
 }
 
@@ -277,9 +277,20 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
 pub(crate) mod tests {
 
     use super::*;
+    use crate::{AxiomEvent, AxiomMsg};
     use serde_json::{Value, json};
     use tracing::Level;
     use tracing_subscriber::{Registry, layer::SubscriberExt};
+
+    impl AxiomMsg {
+        pub fn as_event(&self) -> Option<&AxiomEvent> {
+            if let AxiomMsg::Event(event) = self {
+                Some(event)
+            } else {
+                None
+            }
+        }
+    }
 
     fn check_ev_map_depth_one(ev_map: &serde_json::Map<String, Value>) {
         for (key, val) in ev_map.iter() {
@@ -373,15 +384,21 @@ pub(crate) mod tests {
         assert_eq!(
             events
                 .iter()
-                .map(|evt| evt.otel.trace_id)
+                .map(|evt| evt.as_event().unwrap().otel.trace_id)
                 .collect::<Vec<_>>(),
-            std::iter::repeat_n(Some(events[0].otel.trace_id.unwrap()), events.len())
-                .collect::<Vec<_>>()
+            std::iter::repeat_n(
+                Some(events[0].as_event().unwrap().otel.trace_id.unwrap()),
+                events.len()
+            )
+            .collect::<Vec<_>>()
         );
         assert_eq!(
             events
                 .iter()
-                .map(|evt| (evt.otel.parent_span_id, evt.otel.span_id))
+                .map(|evt| (
+                    evt.as_event().unwrap().otel.parent_span_id,
+                    evt.as_event().unwrap().otel.span_id
+                ))
                 .collect::<Vec<_>>(),
             vec![
                 (Some(child_id), None),                  // the event
@@ -393,7 +410,13 @@ pub(crate) mod tests {
         assert_eq!(
             events
                 .iter()
-                .map(|evt| evt.events.event_field.fields.get("overridden_field"))
+                .map(|evt| evt
+                    .as_event()
+                    .unwrap()
+                    .events
+                    .event_field
+                    .fields
+                    .get("overridden_field"))
                 .collect::<Vec<_>>(),
             vec![
                 (Some(&or_val_e.into())),  // the event
@@ -404,7 +427,7 @@ pub(crate) mod tests {
         );
 
         let log_event = &events[0];
-        let root = match serde_json::to_value(log_event).unwrap() {
+        let root = match serde_json::to_value(log_event.as_event().unwrap()).unwrap() {
             Value::Object(root) => root,
             val => panic!(
                 "expected event to serialize into map, instead got {:#?}",
@@ -451,7 +474,8 @@ pub(crate) mod tests {
 
         debug_assert_eq!(ev_map.get("level"), Some(&json!("info")));
         debug_assert!(
-            before <= log_event.otel.time && log_event.otel.time <= after,
+            before <= log_event.as_event().unwrap().otel.time
+                && log_event.as_event().unwrap().otel.time <= after,
             "invalid timestamp: {:#?}",
             ev_map.get("time")
         );
@@ -467,6 +491,8 @@ pub(crate) mod tests {
         let child_closing_event = events.get(1).unwrap();
         debug_assert_eq!(
             child_closing_event
+                .as_event()
+                .unwrap()
                 .events
                 .event_field
                 .fields
@@ -475,7 +501,7 @@ pub(crate) mod tests {
         );
 
         let parent_closing_event = &events[2];
-        let root = match serde_json::to_value(parent_closing_event).unwrap() {
+        let root = match serde_json::to_value(parent_closing_event.as_event().unwrap()).unwrap() {
             Value::Object(root) => root,
             val => panic!(
                 "expected event to serialize into map, instead got {:#?}",
@@ -535,10 +561,19 @@ pub(crate) mod tests {
         assert_eq!(receiver.blocking_recv_many(&mut events, 128), 3);
         let event = events[0].take().unwrap();
         debug_assert_eq!(
-            event.events.event_field.fields.get("message"),
+            event
+                .as_event()
+                .unwrap()
+                .events
+                .event_field
+                .fields
+                .get("message"),
             Some(&"message".into())
         );
-        debug_assert_eq!(event.otel.span_id, None);
-        debug_assert_eq!(event.otel.parent_span_id, Some(parent_id));
+        debug_assert_eq!(event.as_event().unwrap().otel.span_id, None);
+        debug_assert_eq!(
+            event.as_event().unwrap().otel.parent_span_id,
+            Some(parent_id)
+        );
     }
 }

@@ -1,4 +1,4 @@
-use crate::{CreateEventsPayload, ExtraFields, Url};
+use crate::{AxiomMetric, CreateEventsPayload, ExtraFields, Url};
 use std::{
     fmt::{self, Debug},
     pin::Pin,
@@ -8,7 +8,7 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::{instrument::WithSubscriber, subscriber::NoSubscriber};
 
-use crate::AxiomEvent;
+use crate::AxiomMsg;
 
 #[derive(Debug)]
 pub struct BadRedirect {
@@ -116,14 +116,14 @@ impl Backend for ClientBackend {
 }
 
 struct BackgroundTaskInner<B> {
-    receiver: mpsc::Receiver<Option<AxiomEvent>>,
+    receiver: mpsc::Receiver<Option<AxiomMsg>>,
     extra_fields: ExtraFields,
     backend: B,
     backoff_count: u32,
     quitting: bool,
     // we can't recv into inflight_reqs because the buffer must hold `Option`s
-    recv_buf: Vec<Option<AxiomEvent>>,
-    inflight_reqs: Vec<AxiomEvent>,
+    recv_buf: Vec<Option<AxiomMsg>>,
+    inflight_reqs: Vec<AxiomMsg>,
 }
 
 struct InflightState<F> {
@@ -339,7 +339,7 @@ impl BackgroundTaskFut<ClientBackend> {
         axiom_endpoint_url: Url,
         http_headers: reqwest::header::HeaderMap,
         extra_fields: ExtraFields,
-        receiver: mpsc::Receiver<Option<AxiomEvent>>,
+        receiver: mpsc::Receiver<Option<AxiomMsg>>,
     ) -> Self {
         Self::new_with_backend(
             extra_fields,
@@ -353,7 +353,7 @@ impl<B: Backend> BackgroundTaskFut<B> {
     pub fn new_with_backend(
         extra_fields: ExtraFields,
         backend: B,
-        receiver: mpsc::Receiver<Option<AxiomEvent>>,
+        receiver: mpsc::Receiver<Option<AxiomMsg>>,
     ) -> Self {
         Self(
             BackgroundTaskInner {
@@ -398,11 +398,11 @@ pub type BackgroundTask = BackgroundTaskFut<ClientBackend>;
 /// It'll still try to send all available data and then quit.
 #[derive(Clone)]
 pub struct BackgroundTaskController {
-    sender: mpsc::Sender<Option<AxiomEvent>>,
+    sender: mpsc::Sender<Option<AxiomMsg>>,
 }
 
 impl BackgroundTaskController {
-    pub fn new(sender: mpsc::Sender<Option<AxiomEvent>>) -> Self {
+    pub fn new(sender: mpsc::Sender<Option<AxiomMsg>>) -> Self {
         Self { sender }
     }
 
@@ -420,16 +420,16 @@ impl BackgroundTaskController {
 
     pub async fn export_metrics(
         &self,
-        event: AxiomEvent,
-    ) -> Result<(), mpsc::error::SendError<Option<AxiomEvent>>> {
-        self.sender.send(Some(event)).await
+        metric: AxiomMetric,
+    ) -> Result<(), mpsc::error::SendError<Option<AxiomMsg>>> {
+        self.sender.send(Some(AxiomMsg::Metric(metric))).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AttributeField, EventField, OtelField, ResourceField};
+    use crate::{AttributeField, AxiomEvent, AxiomMsg, EventField, OtelField, ResourceField};
     use crate::{CreateEventsPayload, SpanId, builder::DEFAULT_CHANNEL_SIZE};
     use axum::{
         Json, Router,
@@ -456,7 +456,7 @@ mod tests {
     use tracing_subscriber::{Layer, filter, layer::SubscriberExt};
 
     struct RecorderBackend {
-        events: Vec<AxiomEvent>,
+        events: Vec<AxiomMsg>,
         induce_failure: bool,
     }
 
@@ -547,8 +547,12 @@ mod tests {
         debug_assert!(matches!(task.1, State::Idle));
 
         let evt = new_event(Some(1234));
-        sender.blocking_send(Some(evt.clone())).unwrap();
-        sender.blocking_send(Some(evt.clone())).unwrap();
+        sender
+            .blocking_send(Some(AxiomMsg::Event(evt.clone())))
+            .unwrap();
+        sender
+            .blocking_send(Some(AxiomMsg::Event(evt.clone())))
+            .unwrap();
 
         // Idle => Inflight
         debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
@@ -557,27 +561,27 @@ mod tests {
 
         // add to queue while task is not processing new events
         sender
-            .blocking_send(Some(AxiomEvent {
+            .blocking_send(Some(AxiomMsg::Event(AxiomEvent {
                 otel: OtelField {
                     span_id: Some(SpanId::from(NonZeroU64::new(1).unwrap())),
                     ..evt.otel.clone()
                 },
                 ..evt.clone()
-            }))
+            })))
             .unwrap();
 
         // send_task completes with Ok => idle
         debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
         debug_assert!(matches!(task.1, State::Idle));
         debug_assert_eq!(task.0.backend.events.len(), 2);
-        debug_assert_eq!(task.0.backend.events[0], evt);
-        debug_assert_eq!(task.0.backend.events[1], evt);
+        debug_assert_eq!(task.0.backend.events[0], AxiomMsg::Event(evt.clone()));
+        debug_assert_eq!(task.0.backend.events[1], AxiomMsg::Event(evt));
 
         debug_assert_eq!(Pin::new(&mut task).poll(&mut cx), Poll::Pending);
         debug_assert!(matches!(task.1, State::Inflight(_)));
         debug_assert_eq!(task.0.backend.events.len(), 3);
         debug_assert_eq!(
-            task.0.backend.events[2].otel.span_id,
+            task.0.backend.events[2].as_event().unwrap().otel.span_id,
             Some(SpanId::from(NonZeroU64::new(1).unwrap()))
         );
 
@@ -624,8 +628,14 @@ mod tests {
         debug_assert!(matches!(task.1, State::Idle));
 
         let evt = new_event(Some(1234));
-        sender.send(Some(evt.clone())).await.unwrap();
-        sender.send(Some(evt.clone())).await.unwrap();
+        sender
+            .send(Some(AxiomMsg::Event(evt.clone())))
+            .await
+            .unwrap();
+        sender
+            .send(Some(AxiomMsg::Event(evt.clone())))
+            .await
+            .unwrap();
 
         debug_assert_eq!(
             task.0.backend.events.len(),
@@ -685,7 +695,33 @@ mod tests {
         #[serde(flatten)]
         top_level: ApiEvent,
     }
-    type DatasetPayload = Vec<WrappedEvent>;
+
+    #[derive(Clone, Debug, Deserialize, serde::Serialize)]
+    struct WrappedMetric {
+        #[serde(default, rename = "_time")]
+        time: String,
+        metrics: ApiEvent,
+        description: Option<ApiEvent>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, serde::Serialize)]
+    #[serde(untagged)]
+    enum WrappedMsg {
+        Event(WrappedEvent),
+        Metric(WrappedMetric),
+    }
+
+    impl WrappedMsg {
+        fn as_event(&self) -> Option<&WrappedEvent> {
+            if let WrappedMsg::Event(event) = self {
+                Some(event)
+            } else {
+                None
+            }
+        }
+    }
+
+    type DatasetPayload = Vec<WrappedMsg>;
 
     #[derive(Debug, Clone)]
     struct AppState {
@@ -777,10 +813,10 @@ mod tests {
 
         payload.iter().for_each(|evt| {
             let nested_fields: [(&str, Option<&ApiEvent>); 4] = [
-                ("events", Some(&evt.events)),
-                ("attributes", evt.attributes.as_ref()),
-                ("resources", evt.resources.as_ref()),
-                ("top_level", Some(&evt.top_level)),
+                ("events", Some(&evt.as_event().unwrap().events)),
+                ("attributes", evt.as_event().unwrap().attributes.as_ref()),
+                ("resources", evt.as_event().unwrap().resources.as_ref()),
+                ("top_level", Some(&evt.as_event().unwrap().top_level)),
             ];
 
             for (name, fields) in nested_fields {
@@ -812,17 +848,22 @@ mod tests {
                     payload
                         .into_iter()
                         .map(|ev| {
-                            let mut merged = ev.top_level;
-                            merged.extend(ev.resources.unwrap());
-                            merged.extend(ev.attributes.unwrap());
-                            merged.extend(ev.events);
+                            let evt = ev.as_event().expect("not an event").clone();
+                            let mut merged = evt.top_level;
+                            merged.extend(evt.resources.unwrap());
+                            merged.extend(evt.attributes.unwrap());
+                            merged.extend(evt.events);
                             merged
                         })
                         .collect::<Vec<_>>(),
                 );
             }
             Entry::Occupied(mut e) => {
-                e.get_mut().extend(payload.into_iter().map(|e| e.events));
+                e.get_mut().extend(
+                    payload
+                        .into_iter()
+                        .map(|e| e.as_event().unwrap().clone().events),
+                );
             }
         };
 
