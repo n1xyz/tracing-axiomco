@@ -377,6 +377,7 @@ pub struct AxiomMetric {
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)] // allowing this since AxiomEvent is main variant 
 pub enum AxiomMsg {
     Event(AxiomEvent),
     Metric(AxiomMetric),
