@@ -128,7 +128,7 @@ pub struct Fields {
 }
 
 // see https://axiom.co/docs/query-data/traces?utm_source=chatgpt.com#trace-schema-overview for Axiom trace schema
-// list of reserved field names (case insensitive):
+// list of reserved field names, all are flattened/inlined when serialized (case insensitive):
 // trace_id
 // span_id
 // parent_span_id
@@ -136,10 +136,10 @@ pub struct Fields {
 // kind
 // duration
 // [resources] service.name
-// [events] _time
 // [events] event_name
 // [events] level
-// [events] event_field
+// [events] logs
+// [events] metrics
 // [attributes] annotation_type
 // [attributes] idle_ns
 // [attributes] busy_ns
@@ -343,8 +343,9 @@ pub struct AttributeField {
 pub struct EventField {
     pub event_name: Cow<'static, str>,
     pub level: &'static str,
-    #[serde(flatten)]
-    pub event_field: Fields,
+    // need to configure this into a map field in axiom
+    pub logs: Fields,
+    pub metrics: Fields,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -360,11 +361,13 @@ pub struct AxiomEvent {
     #[serde(flatten)]
     pub otel: OtelField,
     // attributes field
+    #[serde(flatten)]
     pub attributes: AttributeField,
     // events field
+    #[serde(flatten)]
     pub events: EventField,
     // resources field
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub resources: ResourceField,
 }
 

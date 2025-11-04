@@ -4,7 +4,7 @@
 use tracing::Level;
 use tracing_subscriber::{Layer, filter::LevelFilter, layer::SubscriberExt};
 
-const AXIOM_TEST_DATASET_NAME: &str = "porting_test";
+const AXIOM_TEST_DATASET_NAME: &str = "porting_patch";
 
 // the following tests integrates load testing (total of 1024 events)
 // 1024 events max sent due to channel limit -- rest should be dropped

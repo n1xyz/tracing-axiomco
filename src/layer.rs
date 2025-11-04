@@ -189,7 +189,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             events: EventField {
                 level: level_as_axiom_str(meta.level()),
                 event_name: Cow::Borrowed(meta.name()),
-                event_field: fields,
+                logs: fields,
+                metrics: Fields::new(),
             },
             resources: ResourceField {
                 service_name: self.service_name.clone(),
@@ -264,7 +265,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             events: EventField {
                 level: level_as_axiom_str(meta.level()),
                 event_name: Cow::Borrowed(meta.name()),
-                event_field: fields,
+                logs: fields,
+                metrics: Fields::new(),
             },
             resources: ResourceField {
                 service_name: self.service_name.clone(),
@@ -346,7 +348,7 @@ pub(crate) mod tests {
                 tracing::event!(
                     Level::INFO,
                     overridden_field = or_val_e,
-                    event_field = e_val,
+                    logs = e_val,
                     "my event"
                 );
                 (
@@ -393,7 +395,7 @@ pub(crate) mod tests {
         assert_eq!(
             events
                 .iter()
-                .map(|evt| evt.events.event_field.fields.get("overridden_field"))
+                .map(|evt| evt.events.logs.fields.get("overridden_field"))
                 .collect::<Vec<_>>(),
             vec![
                 (Some(&or_val_e.into())),  // the event
@@ -423,42 +425,37 @@ pub(crate) mod tests {
         );
         debug_assert_eq!(root.get("kind").unwrap(), "client");
 
-        let ev_map = match root.get("attributes").unwrap() {
-            Value::Object(data) => data,
-            _ => panic!("data key has unexpected type"),
-        };
-        check_ev_map_depth_one(ev_map);
         debug_assert_eq!(
-            ev_map.get("target"),
+            root.get("target"),
             Some(&json!(format!(
                 "{}::layer::tests",
                 env!("CARGO_CRATE_NAME")
             )))
         );
+        debug_assert_eq!(root.get("service_name"), Some(&json!("service_name")));
 
-        let ev_map = match root.get("resources").unwrap() {
-            Value::Object(data) => data,
-            _ => panic!("data key has unexpected type"),
-        };
-        check_ev_map_depth_one(ev_map);
-        debug_assert_eq!(ev_map.get("service_name"), Some(&json!("service_name")));
-
-        let ev_map = match root.get("events").unwrap() {
-            Value::Object(data) => data,
-            _ => panic!("data key has unexpected type"),
-        };
-        check_ev_map_depth_one(ev_map);
-
-        debug_assert_eq!(ev_map.get("level"), Some(&json!("info")));
+        debug_assert_eq!(root.get("level"), Some(&json!("info")));
         debug_assert!(
             before <= log_event.otel.time && log_event.otel.time <= after,
             "invalid timestamp: {:#?}",
-            ev_map.get("time")
+            root.get("time")
         );
+
+        let ev_map = match root.get("metrics").unwrap() {
+            Value::Object(data) => data,
+            _ => panic!("data key has unexpected type"),
+        };
+        check_ev_map_depth_one(ev_map);
+
+        let ev_map = match root.get("logs").unwrap() {
+            Value::Object(data) => data,
+            _ => panic!("data key has unexpected type"),
+        };
+        check_ev_map_depth_one(ev_map);
 
         //"event_name" field is based on line number so cannot be easily checked
 
-        debug_assert_eq!(ev_map.get("event_field"), Some(&json!(e_val)));
+        debug_assert_eq!(ev_map.get("logs"), Some(&json!(e_val)));
         debug_assert_eq!(ev_map.get("child_field"), Some(&json!(c_val)));
         debug_assert_eq!(ev_map.get("parent_field"), Some(&json!(p_val)));
         debug_assert_eq!(ev_map.get("grandparent_field"), Some(&json!(gp_val)));
@@ -466,11 +463,7 @@ pub(crate) mod tests {
 
         let child_closing_event = events.get(1).unwrap();
         debug_assert_eq!(
-            child_closing_event
-                .events
-                .event_field
-                .fields
-                .get("child_field"),
+            child_closing_event.events.logs.fields.get("child_field"),
             Some(&42.into())
         );
 
@@ -483,19 +476,13 @@ pub(crate) mod tests {
             ),
         };
 
-        let ev_map = match root.get("attributes").unwrap() {
+        let ev_map = match root.get("metrics").unwrap() {
             Value::Object(data) => data,
             _ => panic!("data key has unexpected type"),
         };
         check_ev_map_depth_one(ev_map);
 
-        let ev_map = match root.get("resources").unwrap() {
-            Value::Object(data) => data,
-            _ => panic!("data key has unexpected type"),
-        };
-        check_ev_map_depth_one(ev_map);
-
-        let ev_map = match root.get("events").unwrap() {
+        let ev_map = match root.get("logs").unwrap() {
             Value::Object(data) => data,
             _ => panic!("data key has unexpected type"),
         };
@@ -503,7 +490,7 @@ pub(crate) mod tests {
 
         debug_assert_eq!(root.get("span_id"), Some(&json!(parent_id)));
         debug_assert_eq!(root.get("parent_span_id"), Some(&json!(grandparent_id)));
-        debug_assert_eq!(ev_map.get("events.event_field"), None);
+        debug_assert_eq!(ev_map.get("events.logs"), None);
         debug_assert_eq!(ev_map.get("child_field"), None);
         debug_assert_eq!(ev_map.get("parent_field"), Some(&json!(p_val)));
         debug_assert_eq!(ev_map.get("grandparent_field"), Some(&json!(gp_val)));
@@ -535,7 +522,7 @@ pub(crate) mod tests {
         assert_eq!(receiver.blocking_recv_many(&mut events, 128), 3);
         let event = events[0].take().unwrap();
         debug_assert_eq!(
-            event.events.event_field.fields.get("message"),
+            event.events.logs.fields.get("message"),
             Some(&"message".into())
         );
         debug_assert_eq!(event.otel.span_id, None);

@@ -512,7 +512,8 @@ mod tests {
             events: EventField {
                 event_name: Cow::Borrowed("event name"),
                 level: "INFO",
-                event_field: Default::default(),
+                logs: Default::default(),
+                metrics: Default::default(),
             },
         }
     }
@@ -676,14 +677,8 @@ mod tests {
     struct WrappedEvent {
         #[serde(default, rename = "_time")]
         time: String,
-        #[serde(default)]
+        #[serde(default, flatten)]
         events: ApiEvent,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        attributes: Option<ApiEvent>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        resources: Option<ApiEvent>,
-        #[serde(flatten)]
-        top_level: ApiEvent,
     }
     type DatasetPayload = Vec<WrappedEvent>;
 
@@ -776,18 +771,14 @@ mod tests {
         }
 
         payload.iter().for_each(|evt| {
-            let nested_fields: [(&str, Option<&ApiEvent>); 4] = [
-                ("events", Some(&evt.events)),
-                ("attributes", evt.attributes.as_ref()),
-                ("resources", evt.resources.as_ref()),
-                ("top_level", Some(&evt.top_level)),
-            ];
+            let nested_fields: [(&str, Option<&ApiEvent>); 1] = [("events", Some(&evt.events))];
 
             for (name, fields) in nested_fields {
                 if let Some(field) = fields {
                     for (k, v) in field {
                         // default Deserialize trait will collect this into top level
-                        if k.contains("extra_fields") {
+                        if k.contains("extra_fields") || k.contains("logs") || k.contains("metrics")
+                        {
                             continue;
                         }
 
@@ -808,18 +799,7 @@ mod tests {
 
         match state.datasets.write().unwrap().entry(dataset.to_string()) {
             Entry::Vacant(e) => {
-                e.insert(
-                    payload
-                        .into_iter()
-                        .map(|ev| {
-                            let mut merged = ev.top_level;
-                            merged.extend(ev.resources.unwrap());
-                            merged.extend(ev.attributes.unwrap());
-                            merged.extend(ev.events);
-                            merged
-                        })
-                        .collect::<Vec<_>>(),
-                );
+                e.insert(payload.into_iter().map(|ev| ev.events).collect::<Vec<_>>());
             }
             Entry::Occupied(mut e) => {
                 e.get_mut().extend(payload.into_iter().map(|e| e.events));
@@ -897,17 +877,17 @@ mod tests {
             2,
             "expected exactly one event and one span close"
         );
-        let log_event = &test_dataset[0];
+
+        let log_event = &test_dataset[0].get("logs").unwrap();
         debug_assert_eq!(log_event.get("event.field"), Some(&json!(41)));
         debug_assert_eq!(log_event.get("span.field"), Some(&json!(40)));
+        let log_event = &test_dataset[0];
         debug_assert_eq!(log_event.get("level"), Some(&json!("info")));
         debug_assert_eq!(log_event.get("target"), Some(&json!("test-target")));
         debug_assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
         let trace_id = log_event.get("trace_id").unwrap();
 
         let span_event = &test_dataset[1];
-        debug_assert_eq!(span_event.get("event.field"), None);
-        debug_assert_eq!(span_event.get("span.field"), Some(&json!(40)));
         debug_assert_eq!(span_event.get("level"), Some(&json!("warn")));
         debug_assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
         debug_assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
@@ -917,6 +897,9 @@ mod tests {
             Some(span_event.get("span_id").unwrap())
         );
         debug_assert_eq!(span_event.get("trace_id"), Some(trace_id));
+        let span_event = &test_dataset[1].get("logs").unwrap();
+        debug_assert_eq!(span_event.get("event.field"), None);
+        debug_assert_eq!(span_event.get("span.field"), Some(&json!(40)));
     }
 
     #[tokio::test]
