@@ -75,3 +75,7 @@ All span/event messages follows Axiom's [trace schema](https://axiom.co/docs/que
 
 The layer implementation minimizes allocations to minimize blocking user code.
 To reduce allocations, use a `Cow::Borrowed` with an `&'static str` for the service name and names of extra fields.
+
+## Integration with Proton
+
+Follow outlined [instructions](https://axiom.co/docs/apl/data-types/map-fields#create-map-fields-using-ui) to turn the `logs` field into an Axiom map field. 
