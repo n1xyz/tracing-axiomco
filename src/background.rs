@@ -510,7 +510,7 @@ mod tests {
             },
             resources: ResourceField { service_name: None },
             events: EventField {
-                event_name: Cow::Borrowed("event name"),
+                message: Cow::Borrowed("event name"),
                 level: "INFO",
                 logs: Default::default(),
                 metrics: Default::default(),
@@ -884,13 +884,13 @@ mod tests {
         let log_event = &test_dataset[0];
         debug_assert_eq!(log_event.get("level"), Some(&json!("info")));
         debug_assert_eq!(log_event.get("target"), Some(&json!("test-target")));
-        debug_assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
+        debug_assert_eq!(log_event.get("name"), Some(&json!("test-name")));
         let trace_id = log_event.get("trace_id").unwrap();
 
         let span_event = &test_dataset[1];
         debug_assert_eq!(span_event.get("level"), Some(&json!("warn")));
         debug_assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
-        debug_assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
+        debug_assert_eq!(span_event.get("name"), Some(&json!("span name")));
         debug_assert!(span_event.get("span_id").is_some());
         debug_assert_eq!(
             log_event.get("parent_span_id"),

@@ -167,6 +167,11 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             }
         }
         event.record(&mut fields);
+        let msg = match &fields.fields.remove("message") {
+            Some(crate::Value::String(s)) => s.clone(),
+            _ => Cow::Borrowed(""),
+        };
+
         // don't care if channel closed. if capacity is reached, we have larger problems
         let _ = self.sender.try_send(Some(AxiomEvent {
             otel: OtelField {
@@ -177,7 +182,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                     .and_then(|s| s.extensions().get::<TraceId>().copied()),
                 parent_span_id: span.and_then(|s| s.extensions().get::<SpanId>().copied()),
                 kind: kind_as_axiom_str(&SpanKind::CLIENT),
-                name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
+                name: Cow::Borrowed(meta.name()),
                 duration_ms: None,
             },
             attributes: AttributeField {
@@ -188,7 +193,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             },
             events: EventField {
                 level: level_as_axiom_str(meta.level()),
-                event_name: Cow::Borrowed(meta.name()),
+                message: msg,
                 logs: fields,
                 metrics: Fields::new(),
             },
@@ -243,6 +248,10 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         );
         span.extensions_mut().remove::<Fields>();
         let trace_id = span.extensions_mut().remove::<TraceId>();
+        let msg = match &fields.fields.remove("message") {
+            Some(crate::Value::String(s)) => s.clone(),
+            _ => Cow::Borrowed(""),
+        };
 
         let _ = self.sender.try_send(Some(AxiomEvent {
             otel: OtelField {
@@ -253,7 +262,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                     .parent()
                     .and_then(|p| p.extensions().get::<SpanId>().copied()),
                 kind: kind_as_axiom_str(&SpanKind::CLIENT),
-                name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
+                name: Cow::Borrowed(meta.name()),
                 duration_ms,
             },
             attributes: AttributeField {
@@ -264,7 +273,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             },
             events: EventField {
                 level: level_as_axiom_str(meta.level()),
-                event_name: Cow::Borrowed(meta.name()),
+                message: msg,
                 logs: fields,
                 metrics: Fields::new(),
             },
@@ -416,13 +425,10 @@ pub(crate) mod tests {
         debug_assert_eq!(root.get("span_id"), None);
         debug_assert_eq!(root.get("parent_span_id"), Some(&json!(child_id)));
         debug_assert_eq!(root.get("kind"), Some(&json!("client")));
-        debug_assert_eq!(
-            root.get("name"),
-            Some(&json!(format!(
-                "{}::layer::tests",
-                env!("CARGO_CRATE_NAME")
-            )))
-        );
+        // TODO debug stuff
+        tracing::error!("root: {:?}", &root);
+        debug_assert_eq!(root.get("message"), Some(&Value::from("my event")));
+
         debug_assert_eq!(root.get("kind").unwrap(), "client");
 
         debug_assert_eq!(
@@ -453,7 +459,7 @@ pub(crate) mod tests {
         };
         check_ev_map_depth_one(ev_map);
 
-        //"event_name" field is based on line number so cannot be easily checked
+        // "name" field is based on line number so cannot be easily checked
 
         debug_assert_eq!(ev_map.get("logs"), Some(&json!(e_val)));
         debug_assert_eq!(ev_map.get("child_field"), Some(&json!(c_val)));
@@ -521,10 +527,7 @@ pub(crate) mod tests {
         let mut events = Vec::with_capacity(1);
         assert_eq!(receiver.blocking_recv_many(&mut events, 128), 3);
         let event = events[0].take().unwrap();
-        debug_assert_eq!(
-            event.events.logs.fields.get("message"),
-            Some(&"message".into())
-        );
+        debug_assert_eq!(event.events.message, Cow::Borrowed("message"));
         debug_assert_eq!(event.otel.span_id, None);
         debug_assert_eq!(event.otel.parent_span_id, Some(parent_id));
     }
