@@ -777,7 +777,7 @@ mod tests {
                 if let Some(field) = fields {
                     for (k, v) in field {
                         // default Deserialize trait will collect this into top level
-                        if k.contains("extra_fields") || k.contains("logs") || k.contains("metrics")
+                        if k.contains("extra_fields") || k.contains("data") || k.contains("metrics")
                         {
                             continue;
                         }
@@ -878,7 +878,7 @@ mod tests {
             "expected exactly one event and one span close"
         );
 
-        let log_event = &test_dataset[0].get("logs").unwrap();
+        let log_event = &test_dataset[0].get("data").unwrap();
         debug_assert_eq!(log_event.get("event.field"), Some(&json!(41)));
         debug_assert_eq!(log_event.get("span.field"), Some(&json!(40)));
         let log_event = &test_dataset[0];
@@ -897,7 +897,7 @@ mod tests {
             Some(span_event.get("span_id").unwrap())
         );
         debug_assert_eq!(span_event.get("trace_id"), Some(trace_id));
-        let span_event = &test_dataset[1].get("logs").unwrap();
+        let span_event = &test_dataset[1].get("data").unwrap();
         debug_assert_eq!(span_event.get("event.field"), None);
         debug_assert_eq!(span_event.get("span.field"), Some(&json!(40)));
     }

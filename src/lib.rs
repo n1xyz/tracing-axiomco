@@ -344,6 +344,7 @@ pub struct EventField {
     pub event_name: Cow<'static, str>,
     pub level: &'static str,
     // need to configure this into a map field in axiom
+    #[serde(rename = "data")]
     pub logs: Fields,
     pub metrics: Fields,
 }
