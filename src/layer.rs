@@ -447,7 +447,7 @@ pub(crate) mod tests {
         };
         check_ev_map_depth_one(ev_map);
 
-        let ev_map = match root.get("logs").unwrap() {
+        let ev_map = match root.get("data").unwrap() {
             Value::Object(data) => data,
             _ => panic!("data key has unexpected type"),
         };
@@ -482,7 +482,7 @@ pub(crate) mod tests {
         };
         check_ev_map_depth_one(ev_map);
 
-        let ev_map = match root.get("logs").unwrap() {
+        let ev_map = match root.get("data").unwrap() {
             Value::Object(data) => data,
             _ => panic!("data key has unexpected type"),
         };

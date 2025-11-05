@@ -78,4 +78,4 @@ To reduce allocations, use a `Cow::Borrowed` with an `&'static str` for the serv
 
 ## Integration with Proton
 
-Follow outlined [instructions](https://axiom.co/docs/apl/data-types/map-fields#create-map-fields-using-ui) to turn the `logs` field into an Axiom map field. 
+Follow outlined [instructions](https://axiom.co/docs/apl/data-types/map-fields#create-map-fields-using-ui) to turn the `data` field into an Axiom map field. 
