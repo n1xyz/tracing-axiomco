@@ -179,6 +179,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                 kind: kind_as_axiom_str(&SpanKind::CLIENT),
                 name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
                 duration_ms: None,
+                error: *meta.level() <= Level::ERROR,
             },
             attributes: AttributeField {
                 annotation_type: Some(Cow::Borrowed("span_event")),
@@ -255,6 +256,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                 kind: kind_as_axiom_str(&SpanKind::CLIENT),
                 name: Cow::Borrowed(meta.module_path().unwrap_or("default_module")),
                 duration_ms,
+                error: *meta.level() <= Level::ERROR,
             },
             attributes: AttributeField {
                 annotation_type: None,

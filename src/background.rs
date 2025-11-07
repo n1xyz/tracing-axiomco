@@ -501,6 +501,7 @@ mod tests {
                 duration_ms: None,
                 kind: "client",
                 name: Cow::Borrowed("name"),
+                error: false,
             },
             attributes: AttributeField {
                 annotation_type: None,
@@ -885,6 +886,10 @@ mod tests {
         debug_assert_eq!(log_event.get("level"), Some(&json!("info")));
         debug_assert_eq!(log_event.get("target"), Some(&json!("test-target")));
         debug_assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
+        debug_assert_eq!(
+            log_event.get("error"),
+            Some(&serde_json::Value::Bool(false))
+        );
         let trace_id = log_event.get("trace_id").unwrap();
 
         let span_event = &test_dataset[1];
@@ -897,6 +902,10 @@ mod tests {
             Some(span_event.get("span_id").unwrap())
         );
         debug_assert_eq!(span_event.get("trace_id"), Some(trace_id));
+        debug_assert_eq!(
+            span_event.get("error"),
+            Some(&serde_json::Value::Bool(false))
+        );
         let span_event = &test_dataset[1].get("data").unwrap();
         debug_assert_eq!(span_event.get("event.field"), None);
         debug_assert_eq!(span_event.get("span.field"), Some(&json!(40)));
