@@ -53,7 +53,7 @@ async fn main() {
                     {
                         let msg: String = format!("random event No. {i} duplicate");
 
-                        tracing::event!(Level::WARN, message = msg, event_iteration = i, big_msg = %payload);
+                        tracing::event!(Level::ERROR, message = msg, event_iteration = i, big_msg = %payload);
                     }
                 }
             }

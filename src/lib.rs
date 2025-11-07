@@ -326,6 +326,7 @@ pub struct OtelField {
     pub duration_ms: Option<u64>,
     #[serde(rename = "_time", with = "time::serde::rfc3339")]
     pub time: OffsetDateTime,
+    pub error: bool,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
