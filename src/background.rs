@@ -429,7 +429,7 @@ impl BackgroundTaskController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AttributeField, EventField, OtelField, ResourceField};
+    use crate::{AttributeField, EventField, OtelField, ServiceField};
     use crate::{CreateEventsPayload, SpanId, builder::DEFAULT_CHANNEL_SIZE};
     use axum::{
         Json, Router,
@@ -509,7 +509,7 @@ mod tests {
                 idle_ns: None,
                 target: Cow::Borrowed("target"),
             },
-            resources: ResourceField { service_name: None },
+            service: ServiceField { name: None },
             events: EventField {
                 event_name: Cow::Borrowed("event name"),
                 level: "INFO",

@@ -6,7 +6,7 @@ use tracing::{Level, Subscriber, span};
 use tracing_subscriber::registry::LookupSpan;
 
 use crate::{
-    AttributeField, AxiomEvent, EventField, Fields, OtelField, ResourceField, SpanId, SpanKind,
+    AttributeField, AxiomEvent, EventField, Fields, OtelField, ServiceField, SpanId, SpanKind,
     TraceId,
 };
 
@@ -193,8 +193,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                 logs: fields,
                 metrics: Fields::new(),
             },
-            resources: ResourceField {
-                service_name: self.service_name.clone(),
+            service: ServiceField {
+                name: self.service_name.clone(),
             },
         }));
     }
@@ -270,8 +270,8 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                 logs: fields,
                 metrics: Fields::new(),
             },
-            resources: ResourceField {
-                service_name: self.service_name.clone(),
+            service: ServiceField {
+                name: self.service_name.clone(),
             },
         }));
     }
