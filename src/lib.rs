@@ -352,7 +352,7 @@ pub struct EventField {
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct ResourceField {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "name")]
     pub service_name: Option<Cow<'static, str>>,
 }
 
@@ -369,7 +369,7 @@ pub struct AxiomEvent {
     #[serde(flatten)]
     pub events: EventField,
     // resources field
-    #[serde(default, flatten)]
+    #[serde(default, rename = "service")]
     pub resources: ResourceField,
 }
 

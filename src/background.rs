@@ -778,7 +778,10 @@ mod tests {
                 if let Some(field) = fields {
                     for (k, v) in field {
                         // default Deserialize trait will collect this into top level
-                        if k.contains("extra_fields") || k.contains("data") || k.contains("metrics")
+                        if k.contains("extra_fields")
+                            || k.contains("data")
+                            || k.contains("metrics")
+                            || k.contains("service")
                         {
                             continue;
                         }

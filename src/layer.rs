@@ -434,7 +434,6 @@ pub(crate) mod tests {
                 env!("CARGO_CRATE_NAME")
             )))
         );
-        debug_assert_eq!(root.get("service_name"), Some(&json!("service_name")));
 
         debug_assert_eq!(root.get("level"), Some(&json!("info")));
         debug_assert!(
@@ -448,6 +447,13 @@ pub(crate) mod tests {
             _ => panic!("data key has unexpected type"),
         };
         check_ev_map_depth_one(ev_map);
+        let ev_map = match root.get("service").unwrap() {
+            Value::Object(data) => data,
+            _ => panic!("data key has unexpected type"),
+        };
+        check_ev_map_depth_one(ev_map);
+
+        debug_assert_eq!(ev_map.get("name"), Some(&json!("service_name")));
 
         let ev_map = match root.get("data").unwrap() {
             Value::Object(data) => data,
