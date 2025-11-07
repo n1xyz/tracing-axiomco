@@ -442,11 +442,6 @@ pub(crate) mod tests {
             root.get("time")
         );
 
-        let ev_map = match root.get("metrics").unwrap() {
-            Value::Object(data) => data,
-            _ => panic!("data key has unexpected type"),
-        };
-        check_ev_map_depth_one(ev_map);
         let ev_map = match root.get("service").unwrap() {
             Value::Object(data) => data,
             _ => panic!("data key has unexpected type"),
@@ -483,12 +478,6 @@ pub(crate) mod tests {
                 val
             ),
         };
-
-        let ev_map = match root.get("metrics").unwrap() {
-            Value::Object(data) => data,
-            _ => panic!("data key has unexpected type"),
-        };
-        check_ev_map_depth_one(ev_map);
 
         let ev_map = match root.get("data").unwrap() {
             Value::Object(data) => data,

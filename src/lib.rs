@@ -347,6 +347,7 @@ pub struct EventField {
     // need to configure this into a map field in axiom
     #[serde(rename = "data")]
     pub logs: Fields,
+    #[serde(flatten)]
     pub metrics: Fields,
 }
 
