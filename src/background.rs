@@ -34,7 +34,7 @@ fn report(mut err: &(dyn std::error::Error + 'static)) -> String {
     use std::fmt::Write as _;
     let mut s = format!("{}", err);
     while let Some(src) = err.source() {
-        let _ = write!(s, ": {}", src);
+        write!(s, ": {}", src).unwrap();
         err = src;
     }
     s
@@ -398,6 +398,7 @@ pub type BackgroundTask = BackgroundTaskFut<ClientBackend>;
 /// It'll still try to send all available data and then quit.
 #[derive(Clone)]
 pub struct BackgroundTaskController {
+    // TODO: just close the channel instead of sending None.
     sender: mpsc::Sender<Option<AxiomEvent>>,
 }
 
@@ -415,10 +416,11 @@ impl BackgroundTaskController {
     /// Shut down the associated `BackgroundTask`. Panics if called within an asynchronous
     /// execution context.
     pub fn shutdown_blocking(&self) {
+        // Ignore the error. If no one is listening, it already shut down.
         let _ = self.sender.blocking_send(None);
     }
 
-    pub async fn export_metrics(
+    pub async fn enqueue_event(
         &self,
         event: AxiomEvent,
     ) -> Result<(), mpsc::error::SendError<Option<AxiomEvent>>> {
@@ -500,7 +502,7 @@ mod tests {
                 parent_span_id: None,
                 duration_ms: None,
                 kind: "client",
-                name: Cow::Borrowed("name"),
+                module_path: Cow::Borrowed("name"),
                 error: false,
             },
             attributes: AttributeField {
@@ -510,11 +512,12 @@ mod tests {
                 target: Cow::Borrowed("target"),
             },
             service: ServiceField { name: None },
-            events: EventField {
-                event_name: Cow::Borrowed("event name"),
+            event: EventField {
+                name: Cow::Borrowed("event name"),
                 level: "INFO",
-                logs: Default::default(),
-                metrics: Default::default(),
+                data: Default::default(),
+                extra_fields: Default::default(),
+                message: None,
             },
         }
     }
@@ -885,7 +888,7 @@ mod tests {
         let log_event = &test_dataset[0];
         debug_assert_eq!(log_event.get("level"), Some(&json!("info")));
         debug_assert_eq!(log_event.get("target"), Some(&json!("test-target")));
-        debug_assert_eq!(log_event.get("event_name"), Some(&json!("test-name")));
+        debug_assert_eq!(log_event.get("name"), Some(&json!("test-name")));
         debug_assert_eq!(
             log_event.get("error"),
             Some(&serde_json::Value::Bool(false))
@@ -895,7 +898,7 @@ mod tests {
         let span_event = &test_dataset[1];
         debug_assert_eq!(span_event.get("level"), Some(&json!("warn")));
         debug_assert_eq!(span_event.get("target"), Some(&json!("span-test-target")));
-        debug_assert_eq!(span_event.get("event_name"), Some(&json!("span name")));
+        debug_assert_eq!(span_event.get("name"), Some(&json!("span name")));
         debug_assert!(span_event.get("span_id").is_some());
         debug_assert_eq!(
             log_event.get("parent_span_id"),

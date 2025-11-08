@@ -127,23 +127,33 @@ pub struct Fields {
     pub fields: HashMap<Cow<'static, str>, Value>,
 }
 
-// see https://axiom.co/docs/query-data/traces?utm_source=chatgpt.com#trace-schema-overview for Axiom trace schema
-// list of reserved field names, all are flattened/inlined when serialized (case insensitive):
+// see https://axiom.co/docs/query-data/traces?utm_source=chatgpt.com#trace-schema-overview
+// for Axiom trace schema list of reserved field names, all are
+// flattened/inlined when serialized (case insensitive):
+// _time
 // trace_id
 // span_id
 // parent_span_id
 // name
 // kind
 // duration
-// [resources] service.name
-// [events] event_name
-// [events] level
-// [events] logs
-// [events] metrics
-// [attributes] annotation_type
-// [attributes] idle_ns
-// [attributes] busy_ns
-// [attributes] target
+// error
+// events
+// links
+// service.name // seems not documented but needed for trace explorer
+// level
+// more optional otel cringe:
+// - status.code
+// - status.message
+// - attributes
+// - resource
+// owr own extra stuff:
+// - module_path
+// - data
+// - annotation_type
+// - idle_ns
+// - busy_ns
+// - target
 
 impl Fields {
     pub fn new() -> Self {
@@ -321,7 +331,7 @@ pub struct OtelField {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_span_id: Option<SpanId>,
     pub kind: &'static str,
-    pub name: Cow<'static, str>,
+    pub module_path: Cow<'static, str>,
     #[serde(rename = "duration", skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(rename = "_time", with = "time::serde::rfc3339")]
@@ -342,13 +352,14 @@ pub struct AttributeField {
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct EventField {
-    pub event_name: Cow<'static, str>,
+    pub name: Cow<'static, str>,
     pub level: &'static str,
     // need to configure this into a map field in axiom
-    #[serde(rename = "data")]
-    pub logs: Fields,
+    pub data: Fields,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<Cow<'static, str>>,
     #[serde(flatten)]
-    pub metrics: Fields,
+    pub extra_fields: Fields,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -368,7 +379,7 @@ pub struct AxiomEvent {
     pub attributes: AttributeField,
     // events field
     #[serde(flatten)]
-    pub events: EventField,
+    pub event: EventField,
     // resources field
     #[serde(default)]
     pub service: ServiceField,
