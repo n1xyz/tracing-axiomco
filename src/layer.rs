@@ -134,12 +134,12 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             .span(id)
             .expect("span passed to on_enter is open, valid, and stored by subscriber");
         if let Some(timings) = span.extensions_mut().get_mut::<Timings>() {
-            if timings.entered_depth == 0 {
+            timings.entered_depth += 1;
+            if timings.entered_depth == 1 {
                 let now = Instant::now();
                 timings.idle += now.saturating_duration_since(timings.last).as_nanos() as u64;
                 timings.last = now;
             }
-            timings.entered_depth = timings.entered_depth.saturating_add(1);
         }
     }
 
@@ -148,17 +148,18 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             .span(id)
             .expect("span passed to on_exit is open, valid, and stored by subscriber");
         if let Some(timings) = span.extensions_mut().get_mut::<Timings>() {
-            if timings.entered_depth == 0 {
+            if timings.entered_depth == 1 {
                 let now = Instant::now();
                 timings.busy += now.saturating_duration_since(timings.last).as_nanos() as u64;
                 timings.last = now;
             }
-            timings.entered_depth = timings.entered_depth.saturating_sub(0);
+            // this could be -= 1 and panic on underflow
+            timings.entered_depth = timings.entered_depth.saturating_sub(1);
         }
     }
 
     fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        let span = event.parent().and_then(|id| ctx.span(id)).or_else(|| {
+        let parent_span = event.parent().and_then(|id| ctx.span(id)).or_else(|| {
             event
                 .is_contextual()
                 .then(|| ctx.lookup_current())
@@ -168,7 +169,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         // removed: tracing-log support by calling .normalized_metadata()
         let meta = event.metadata();
         let mut fields = Fields::new();
-        if let Some(ref associated_span) = span {
+        if let Some(ref associated_span) = parent_span {
             for span in associated_span.scope().from_root() {
                 fields.fields.extend(
                     span.extensions()
@@ -194,13 +195,13 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             otel: OtelField {
                 time: timestamp,
                 span_id: None,
-                trace_id: span
+                trace_id: parent_span
                     .as_ref()
                     .and_then(|s| s.extensions().get::<TraceId>().copied()),
-                parent_span_id: span.and_then(|s| s.extensions().get::<SpanId>().copied()),
+                parent_span_id: parent_span.and_then(|s| s.extensions().get::<SpanId>().copied()),
                 kind: kind_as_axiom_str(&SpanKind::CLIENT),
                 module_path: Cow::Borrowed(meta.module_path().unwrap_or("(unknown)")),
-                duration_ms: None,
+                duration_ns: None,
                 error: *meta.level() <= Level::ERROR,
             },
             attributes: AttributeField {
@@ -229,13 +230,13 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             .expect("span passed to on_new_span is open, valid, and stored by subscriber");
         let mut fields = Fields::new();
 
-        let mut duration_ms = None;
+        let mut duration_ns = None;
         let mut idle_ns = None;
         let mut busy_ns = None;
         let timestamp = if let Some(timings) = span.extensions().get::<Timings>() {
-            duration_ms = Some(
+            duration_ns = Some(
                 now.saturating_duration_since(timings.start_instant)
-                    .as_millis() as u64,
+                    .as_nanos() as u64,
             );
             idle_ns = Some(timings.idle);
             busy_ns = Some(timings.busy);
@@ -279,7 +280,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                 kind: kind_as_axiom_str(&SpanKind::CLIENT),
                 // TODO: see if we can just make this None and not send the field
                 module_path: Cow::Borrowed(meta.module_path().unwrap_or("(unknown)")),
-                duration_ms,
+                duration_ns,
                 error: *meta.level() <= Level::ERROR,
             },
             attributes: AttributeField {
@@ -543,10 +544,7 @@ pub(crate) mod tests {
         let mut events = Vec::with_capacity(1);
         assert_eq!(receiver.blocking_recv_many(&mut events, 128), 3);
         let event = events[0].take().unwrap();
-        debug_assert_eq!(
-            event.event.message,
-            Some("message".into())
-        );
+        debug_assert_eq!(event.event.message, Some("message".into()));
         debug_assert_eq!(event.otel.span_id, None);
         debug_assert_eq!(event.otel.parent_span_id, Some(parent_id));
     }

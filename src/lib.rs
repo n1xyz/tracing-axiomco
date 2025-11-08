@@ -333,7 +333,7 @@ pub struct OtelField {
     pub kind: &'static str,
     pub module_path: Cow<'static, str>,
     #[serde(rename = "duration", skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
+    pub duration_ns: Option<u64>,
     #[serde(rename = "_time", with = "time::serde::rfc3339")]
     pub time: OffsetDateTime,
     pub error: bool,

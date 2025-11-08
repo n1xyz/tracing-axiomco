@@ -500,7 +500,7 @@ mod tests {
                 span_id: span_id.map(|i| SpanId::from(NonZeroU64::new(i).unwrap())),
                 trace_id: None,
                 parent_span_id: None,
-                duration_ms: None,
+                duration_ns: None,
                 kind: "client",
                 module_path: Cow::Borrowed("name"),
                 error: false,
