@@ -78,5 +78,5 @@ async fn main() {
     }
 
     controller.shutdown().await;
-    let _ = handle.await;
+    handle.await.unwrap();
 }

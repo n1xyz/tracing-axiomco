@@ -19,7 +19,7 @@ let handle = tokio::spawn(task);
 
 // to exit early:
 controller.shutdown().await;
-let _ = handle.await;
+handle.await.unwrap();
 ```
 
 The events are submitted in the background using the [Ingest Data API](https://axiom.co/docs/restapi/endpoints/ingestIntoDataset).

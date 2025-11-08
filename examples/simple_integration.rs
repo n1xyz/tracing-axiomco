@@ -61,9 +61,9 @@ async fn main() {
     }
 
     for t in tasks {
-        let _ = t.await;
+        t.await.unwrap();
     }
 
     controller.shutdown().await;
-    let _ = handle.await;
+    handle.await.unwrap();
 }
