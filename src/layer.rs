@@ -75,7 +75,7 @@ impl Layer {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Closed(e)) => {
                 let e = e.unwrap();
-                panic!("BackgroundTask dropped while still sending event {e:?}");
+                eprintln!("BackgroundTask dropped while still sending event {e:?}");
             }
             Err(mpsc::error::TrySendError::Full(e)) => {
                 let e = e.unwrap();
