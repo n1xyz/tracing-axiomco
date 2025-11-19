@@ -16,11 +16,17 @@ async fn main() {
         .service_name(std::borrow::Cow::Borrowed("test integration"))
         .build(tracing_axiomco::AXIOM_SERVER_US, AXIOM_TEST_DATASET_NAME)
         .unwrap();
-    let handle = tokio::spawn(task);
+
     let subscriber = tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_filter(LevelFilter::INFO))
         .with(layer);
 
+    let dispatch = tracing::Dispatch::new(
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_filter(LevelFilter::INFO)),
+    );
+    let handle =
+        tracing::dispatcher::with_default(&dispatch, || tokio::task::spawn(async move { task }));
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let mut tasks = Vec::new();
@@ -37,11 +43,11 @@ async fn main() {
                     big_msg = %payload,
                 );
 
-                let gp_enter = gp_span.enter();
+                let _gp_enter = gp_span.enter();
 
                 {
                     let p_span = tracing::span!(Level::TRACE, "parent span", big_msg = %payload,);
-                    let p_enter = p_span.enter();
+                    let _p_enter = p_span.enter();
 
                     {
                         let msg: String = format!("random event No. {i}");
@@ -54,22 +60,17 @@ async fn main() {
                             let msg: String = format!("first child event");
 
                             tracing::event!(Level::WARN, message = msg);
-                            
                         }
                         let c_span = c_enter.exit();
 
-                        let c_enter = c_span.enter();
+                        let _c_enter = c_span.enter();
                         {
                             let msg: String = format!("second child event");
 
                             tracing::event!(Level::WARN, message = msg);
                         }
-                        drop(c_enter);
                     }
-                    drop(p_enter);
-                    // std::thread::sleep(std::time::Duration::from_secs(3600))
                 }
-                drop(gp_enter);
             }
         }))
     }
@@ -77,7 +78,6 @@ async fn main() {
     for t in tasks {
         t.await.unwrap();
     }
-    eprintln!("All tasks completed, shutting down");
 
     controller.shutdown().await;
     handle.await.unwrap();
