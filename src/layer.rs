@@ -169,18 +169,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         // removed: tracing-log support by calling .normalized_metadata()
         let meta = event.metadata();
         let mut fields = Fields::new();
-        if let Some(ref associated_span) = parent_span {
-            for span in associated_span.scope().from_root() {
-                fields.fields.extend(
-                    span.extensions()
-                        .get::<Fields>()
-                        .expect("span registered in on_new_span")
-                        .fields
-                        .iter()
-                        .map(|(field, val)| (field.clone(), val.clone())),
-                );
-            }
-        }
+        // removed: parent span field copyin to avoid unnecessary clones
         event.record(&mut fields);
         let message = match fields.fields.get("message") {
             Some(crate::Value::String(_)) => {
@@ -246,19 +235,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
         };
 
         let meta = span.metadata();
-        let parent_id = span.parent().map(|p| p.id());
-        if let Some(scope_iter) = parent_id.as_ref().and_then(|p_id| ctx.span_scope(p_id)) {
-            for span in scope_iter.from_root() {
-                fields.fields.extend(
-                    span.extensions()
-                        .get::<Fields>()
-                        .expect("span registered in on_new_span")
-                        .fields
-                        .iter()
-                        .map(|(field, val)| (field.clone(), val.clone())),
-                );
-            }
-        }
+        // removed: parent span field copying to avoid unnecessary clones
         fields.fields.extend(
             span.extensions()
                 .get::<Fields>()
