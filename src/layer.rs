@@ -123,7 +123,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
                 kind: kind_as_axiom_str(&SpanKind::CLIENT),
                 // TODO: see if we can just make this None and not send the field
                 module_path: Cow::Borrowed(attrs.metadata().module_path().unwrap_or("(unknown)")),
-                duration_ns: None,
+                duration_ns: Some(0), // TODO: tradeoff to sending span msg on open is that duration wouldnt be useful
                 error: false,
             },
             attributes: AttributeField {
