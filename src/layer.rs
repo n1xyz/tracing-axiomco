@@ -110,7 +110,39 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> tracing_subscriber::Layer<S> for La
             .and_then(|p| p.extensions().get::<TraceId>().copied())
             .unwrap_or_else(TraceId::generate);
         extensions.insert(trace_id);
-        extensions.insert(SpanId::generate());
+        let span_id = SpanId::generate();
+        extensions.insert(span_id);
+        self.enqueue_event(AxiomEvent {
+            otel: OtelField {
+                time: OffsetDateTime::now_utc(),
+                span_id: Some(span_id),
+                trace_id: Some(trace_id),
+                parent_span_id: span
+                    .parent()
+                    .and_then(|p| p.extensions().get::<SpanId>().copied()),
+                kind: kind_as_axiom_str(&SpanKind::CLIENT),
+                // TODO: see if we can just make this None and not send the field
+                module_path: Cow::Borrowed(attrs.metadata().module_path().unwrap_or("(unknown)")),
+                duration_ns: None,
+                error: false,
+            },
+            attributes: AttributeField {
+                annotation_type: None,
+                idle_ns: None,
+                busy_ns: None,
+                target: Cow::Borrowed(attrs.metadata().target()),
+            },
+            event: EventField {
+                level: level_as_axiom_str(attrs.metadata().level()),
+                name: Cow::Borrowed(attrs.metadata().name()),
+                data: Fields::default(),
+                extra_fields: Fields::new(),
+                message: None,
+            },
+            service: ServiceField {
+                name: self.service_name.clone(),
+            },
+        });
     }
 
     fn on_record(
