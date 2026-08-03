@@ -46,3 +46,30 @@ axiom.deinit().await;
 
 See `examples/simple.rs` for a working example.
 
+## Structured JSON fields
+
+The optional `serde` feature records values selected with tracing's `@` sigil
+as structured JSON rather than Debug strings:
+
+```rust
+tracing::info!(x = @vec![1u64, 2, 3], "...");
+```
+
+This support currently requires the [serde-enabled tracing fork](https://github.com/n1xyz/tracing/tree/serde-at). Enable the feature
+on both dependencies:
+
+```toml
+[dependencies]
+tracing = { version = "0.1", features = ["serde"] }
+tracing-axiom-n1 = { version = "0.1", features = ["serde"] }
+```
+
+Then patch any tracing crates used in the workspace root `Cargo.toml`:
+
+```toml
+[patch.crates-io]
+tracing = { git = "https://github.com/n1xyz/tracing.git", rev = "5989b57242d84ed144776aa54b2d879fb098cff2" }
+tracing-core = { git = "https://github.com/n1xyz/tracing.git", rev = "5989b57242d84ed144776aa54b2d879fb098cff2" }
+tracing-serde = { git = "https://github.com/n1xyz/tracing.git", rev = "5989b57242d84ed144776aa54b2d879fb098cff2" }
+tracing-subscriber = { git = "https://github.com/n1xyz/tracing.git", rev = "5989b57242d84ed144776aa54b2d879fb098cff2" }
+```

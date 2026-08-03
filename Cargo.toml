@@ -8,6 +8,8 @@ name = "tracing_axiom"
 
 [features]
 default = ["rustls-tls-webpki-roots"]
+# Requires a serde-enabled tracing patch; see the README.
+serde = []
 native-tls = ["reqwest/native-tls"]
 native-tls-vendored = ["reqwest/native-tls-vendored"]
 native-tls-alpn = ["reqwest/native-tls-alpn"]

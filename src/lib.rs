@@ -553,12 +553,10 @@ impl std::error::Error for LossyRedirect {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
-    // fields whose value is `null` seem to be ignored by Honeycomb, so no Null variant
-    // arrays and objects are not supported
     Bool(bool),
     Number(serde_json::Number),
     String(Cow<'static, str>),
-    Map(std::collections::HashMap<Cow<'static, str>, Value>),
+    Json(serde_json::Value),
 }
 
 impl From<bool> for Value {
@@ -651,7 +649,7 @@ impl serde::Serialize for Value {
             Self::Bool(b) => serializer.serialize_bool(*b),
             Self::Number(n) => n.serialize(serializer),
             Self::String(s) => serializer.serialize_str(s),
-            Self::Map(m) => serializer.collect_map(m),
+            Self::Json(v) => v.serialize(serializer),
         }
     }
 }
