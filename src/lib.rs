@@ -551,12 +551,12 @@ impl std::fmt::Display for LossyRedirect {
 
 impl std::error::Error for LossyRedirect {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Bool(bool),
     Number(serde_json::Number),
     String(Cow<'static, str>),
-    Json(serde_json::Value),
+    Json(Box<serde_json::value::RawValue>),
 }
 
 impl From<bool> for Value {

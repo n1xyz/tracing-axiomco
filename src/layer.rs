@@ -128,7 +128,7 @@ impl tracing::field::Visit for FieldCascade {
         field: &tracing::field::Field,
         value: &tracing::field::SerdeValue<'_>,
     ) {
-        match serde_json::to_value(value.as_serialize()) {
+        match serde_json::value::to_raw_value(value.as_serialize()) {
             Ok(value) => self.record(field, crate::Value::Json(value)),
             Err(error) => {
                 tracing::warn!(
