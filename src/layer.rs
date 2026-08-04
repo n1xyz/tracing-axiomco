@@ -130,7 +130,15 @@ impl tracing::field::Visit for FieldCascade {
     ) {
         match serde_json::to_value(value.as_serialize()) {
             Ok(value) => self.record(field, crate::Value::Json(value)),
-            Err(_) => self.record_debug(field, value),
+            Err(error) => {
+                tracing::warn!(
+                    target: crate::INTERNAL_TARGET,
+                    field = field.name(),
+                    ?error,
+                    "failed to serialize field as JSON, recording Debug"
+                );
+                self.record_debug(field, value);
+            }
         }
     }
 }
