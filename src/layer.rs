@@ -121,6 +121,26 @@ impl tracing::field::Visit for FieldCascade {
             crate::Value::String(Cow::Owned(chain)),
         );
     }
+
+    #[cfg(feature = "serde")]
+    fn record_serde(
+        &mut self,
+        field: &tracing::field::Field,
+        value: &tracing::field::SerdeValue<'_>,
+    ) {
+        match serde_json::value::to_raw_value(value.as_serialize()) {
+            Ok(value) => self.record(field, crate::Value::Json(value)),
+            Err(error) => {
+                tracing::warn!(
+                    target: crate::INTERNAL_TARGET,
+                    field = field.name(),
+                    ?error,
+                    "failed to serialize field as JSON, recording Debug"
+                );
+                self.record_debug(field, value);
+            }
+        }
+    }
 }
 
 pub struct Layer<X> {
