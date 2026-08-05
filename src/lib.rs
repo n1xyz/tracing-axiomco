@@ -673,6 +673,9 @@ struct EventService<'a> {
 
 // Support team told me 1<<20 max per ndjson line
 const NDJSON_LINE_LEN_MAX: usize = 1 << 20;
+const METRICS_PROTO_LEN_MAX: usize = 4 << 20;
+const METRIC_ATTRIBUTE_NAME_LEN_MAX: usize = 256;
+const METRIC_ATTRIBUTE_VALUE_LEN_MAX: usize = 1 << 10;
 const WARN_JSON_LEN_MAX: usize = 2 << 10;
 const WARN_JSON_SUFFIX: &str = "...<truncated>";
 
@@ -1070,14 +1073,54 @@ async fn met_coord_task(
 
         let time_unix_nano =
             time::OffsetDateTime::now_utc().unix_timestamp_nanos() as u64;
-        let resource_attrs = Some(BTreeMap::from([(
+        let resource_attrs = BTreeMap::from([(
             "service.name".to_string(),
             metrics::AttrValue::Str(service_name.to_string()),
-        )]));
+        )]);
         let batch =
             std::mem::replace(&mut mets, Vec::with_capacity(collect_target));
-        let proto =
-            metrics::metrics_to_proto(batch, time_unix_nano, resource_attrs);
+        for (metric_name, attrs) in batch
+            .iter()
+            .map(|metric| (Some(metric.name.as_str()), &metric.attrs))
+            .chain(std::iter::once((None, &resource_attrs)))
+        {
+            for (attribute_name, attribute_value) in attrs {
+                let attribute_value_len = match attribute_value {
+                    metrics::AttrValue::Str(value) => Some(value.len()),
+                    _ => None,
+                };
+                if attribute_name.len() > METRIC_ATTRIBUTE_NAME_LEN_MAX
+                    || attribute_value_len
+                        .is_some_and(|len| len > METRIC_ATTRIBUTE_VALUE_LEN_MAX)
+                {
+                    tracing::warn!(
+                        target: INTERNAL_TARGET,
+                        ?metric_name,
+                        attribute_name,
+                        attribute_name_len = attribute_name.len(),
+                        ?attribute_value_len,
+                        attribute_name_bytes_limit = METRIC_ATTRIBUTE_NAME_LEN_MAX,
+                        attribute_value_bytes_limit = METRIC_ATTRIBUTE_VALUE_LEN_MAX,
+                        "metrics attribute exceeds Axiom truncation limits"
+                    );
+                }
+            }
+        }
+        let proto = metrics::metrics_to_proto(
+            batch,
+            time_unix_nano,
+            Some(resource_attrs),
+        );
+        let encoded_len = proto.encoded_len();
+        if encoded_len > METRICS_PROTO_LEN_MAX {
+            tracing::warn!(
+                target: INTERNAL_TARGET,
+                encoded_len,
+                bytes_limit = METRICS_PROTO_LEN_MAX,
+                mets_count,
+                "uncompressed metrics protobuf batch exceeds Axiom limit"
+            );
+        }
 
         body.clear();
         let mut body_writer = body.writer();
