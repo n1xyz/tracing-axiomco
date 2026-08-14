@@ -790,11 +790,7 @@ where
         }
     };
     if len > NDJSON_LINE_LEN_MAX {
-        match warn_json_dump(
-            buf_warn_json,
-            WARN_JSON_LEN_MAX,
-            evt,
-        ) {
+        match warn_json_dump(buf_warn_json, WARN_JSON_LEN_MAX, evt) {
             Ok((event_json_truncated, event_json_was_truncated)) => {
                 tracing::warn!(
                     target: INTERNAL_TARGET,
@@ -1112,11 +1108,8 @@ async fn met_coord_task(
                 }
             }
         }
-        let warn_json = warn_json_dump(
-            &mut buf_warn_json,
-            WARN_JSON_LEN_MAX,
-            &batch,
-        );
+        let warn_json =
+            warn_json_dump(&mut buf_warn_json, WARN_JSON_LEN_MAX, &batch);
         let proto = metrics::metrics_to_proto(
             batch,
             time_unix_nano,
@@ -1918,12 +1911,8 @@ mod tests {
         let mut buf = Vec::with_capacity(WARN_JSON_LEN_MAX);
 
         {
-            let (dump, trunc) = warn_json_dump(
-                &mut buf,
-                WARN_JSON_LEN_MAX,
-                &evt,
-            )
-            .unwrap();
+            let (dump, trunc) =
+                warn_json_dump(&mut buf, WARN_JSON_LEN_MAX, &evt).unwrap();
 
             assert!(trunc);
             assert_eq!(dump.len(), WARN_JSON_LEN_MAX);
@@ -1942,12 +1931,8 @@ mod tests {
         let mut buf = b"stale-bytes".to_vec();
 
         {
-            let (dump, trunc) = warn_json_dump(
-                &mut buf,
-                WARN_JSON_LEN_MAX,
-                &evt,
-            )
-            .unwrap();
+            let (dump, trunc) =
+                warn_json_dump(&mut buf, WARN_JSON_LEN_MAX, &evt).unwrap();
             assert!(!trunc);
             assert!(!dump.contains("stale-bytes"));
         }
