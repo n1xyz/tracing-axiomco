@@ -673,9 +673,12 @@ struct EventService<'a> {
 
 // Support team told me 1<<20 max per ndjson line
 const NDJSON_LINE_LEN_MAX: usize = 1 << 20;
+
+//  metrics limits: https://axiom.co/docs/reference/limits#limits-on-ingested-metrics
 const METRICS_PROTO_LEN_MAX: usize = 4 << 20;
 const METRIC_ATTRIBUTE_NAME_LEN_MAX: usize = 256;
 const METRIC_ATTRIBUTE_VALUE_LEN_MAX: usize = 1 << 10;
+
 const WARN_JSON_LEN_MAX: usize = 2 << 10;
 const WARN_JSON_SUFFIX: &str = "...<truncated>";
 
@@ -733,19 +736,17 @@ where
     Ok(writer.bytes)
 }
 
-fn warn_json_dump<'a, X>(
+fn warn_json_dump<'a>(
     buf: &'a mut Vec<u8>,
-    evt: &EventWrapper<'_, X>,
-) -> Result<(&'a str, bool), serde_json::Error>
-where
-    X: serde::Serialize,
-{
+    len_max: usize,
+    value: &impl serde::Serialize,
+) -> Result<(&'a str, bool), serde_json::Error> {
     buf.clear();
 
-    let limit = WARN_JSON_LEN_MAX.saturating_sub(WARN_JSON_SUFFIX.len());
+    let limit = len_max.saturating_sub(WARN_JSON_SUFFIX.len());
     let trunc = {
         let mut writer = TruncWrite::new(buf, limit);
-        serde_json::to_writer(&mut writer, evt)?;
+        serde_json::to_writer(&mut writer, value)?;
         writer.trunc
     };
 
@@ -789,7 +790,11 @@ where
         }
     };
     if len > NDJSON_LINE_LEN_MAX {
-        match warn_json_dump(buf_warn_json, evt) {
+        match warn_json_dump(
+            buf_warn_json,
+            WARN_JSON_LEN_MAX,
+            evt,
+        ) {
             Ok((event_json_truncated, event_json_was_truncated)) => {
                 tracing::warn!(
                     target: INTERNAL_TARGET,
@@ -1033,6 +1038,7 @@ async fn met_coord_task(
     let mut body = bytes::BytesMut::with_capacity(2048);
     let mut mets_buf = Vec::with_capacity(collect_target);
     let mut mets = Vec::with_capacity(collect_target);
+    let mut buf_warn_json = Vec::with_capacity(WARN_JSON_LEN_MAX);
     loop {
         let mut mets_count = 0;
         mets.clear();
@@ -1106,6 +1112,11 @@ async fn met_coord_task(
                 }
             }
         }
+        let warn_json = warn_json_dump(
+            &mut buf_warn_json,
+            WARN_JSON_LEN_MAX,
+            &batch,
+        );
         let proto = metrics::metrics_to_proto(
             batch,
             time_unix_nano,
@@ -1113,13 +1124,35 @@ async fn met_coord_task(
         );
         let encoded_len = proto.encoded_len();
         if encoded_len > METRICS_PROTO_LEN_MAX {
-            tracing::warn!(
-                target: INTERNAL_TARGET,
-                encoded_len,
-                bytes_limit = METRICS_PROTO_LEN_MAX,
-                mets_count,
-                "uncompressed metrics protobuf batch exceeds Axiom limit"
-            );
+            match warn_json {
+                Ok((metrics_json_truncated, metrics_json_was_truncated)) => {
+                    tracing::warn!(
+                        target: INTERNAL_TARGET,
+                        encoded_len,
+                        bytes_limit = METRICS_PROTO_LEN_MAX,
+                        mets_count,
+                        metrics_json_truncated,
+                        metrics_json_was_truncated,
+                        concat!(
+                            "uncompressed metrics protobuf batch exceeds ",
+                            "Axiom limit"
+                        )
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        target: INTERNAL_TARGET,
+                        encoded_len,
+                        bytes_limit = METRICS_PROTO_LEN_MAX,
+                        mets_count,
+                        ?err,
+                        concat!(
+                            "uncompressed metrics protobuf batch exceeds ",
+                            "Axiom limit and warning dump serialization failed"
+                        )
+                    );
+                }
+            }
         }
 
         body.clear();
@@ -1885,7 +1918,12 @@ mod tests {
         let mut buf = Vec::with_capacity(WARN_JSON_LEN_MAX);
 
         {
-            let (dump, trunc) = warn_json_dump(&mut buf, &evt).unwrap();
+            let (dump, trunc) = warn_json_dump(
+                &mut buf,
+                WARN_JSON_LEN_MAX,
+                &evt,
+            )
+            .unwrap();
 
             assert!(trunc);
             assert_eq!(dump.len(), WARN_JSON_LEN_MAX);
@@ -1904,7 +1942,12 @@ mod tests {
         let mut buf = b"stale-bytes".to_vec();
 
         {
-            let (dump, trunc) = warn_json_dump(&mut buf, &evt).unwrap();
+            let (dump, trunc) = warn_json_dump(
+                &mut buf,
+                WARN_JSON_LEN_MAX,
+                &evt,
+            )
+            .unwrap();
             assert!(!trunc);
             assert!(!dump.contains("stale-bytes"));
         }
